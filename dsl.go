@@ -20,6 +20,7 @@ func (b TaskBuilder) Ignore() TaskBuilder              { b.t.Ignore = true; retu
 func (b TaskBuilder) User() TaskBuilder                { b.t.User = true; return b }
 func (b TaskBuilder) Sudo() TaskBuilder                { b.t.Sudo = true; return b }
 func (b TaskBuilder) Recursive() TaskBuilder           { b.t.Rec = true; return b }
+func (b TaskBuilder) Creates(path string) TaskBuilder  { b.t.Creates = path; return b }
 func (b TaskBuilder) Owner(o string) TaskBuilder       { b.t.Body = o; return b }
 func (b TaskBuilder) Mode(m string) TaskBuilder        { b.t.Body = m; return b }
 

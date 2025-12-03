@@ -65,6 +65,7 @@ func main() {
 - **Systemd Integration** - Manage services (user and system)
 - **Docker Support** - Container and Compose management
 - **Template Expansion** - Variable substitution in files and commands
+- **Idempotent Operations** - Skip tasks when target path exists with `Creates()`
 
 ## DSL Reference
 
@@ -146,6 +147,17 @@ task.Timeout("30s")                // Set timeout
 task.Ignore()                      // Ignore errors
 task.Name("My Task")               // Set display name
 task.Register("result")            // Store output in variable
+task.Creates("/path/to/file")      // Skip if path exists (idempotent)
+```
+
+### Idempotent Operations with Creates
+
+Use `Creates()` to skip tasks when a path already exists on the remote server. This keeps logs clean for idempotent operations:
+
+```go
+porter.Mkdir("/var/data").Creates("/var/data")           // Skip if dir exists
+porter.Install("/tmp/app", "/usr/bin/app").Creates("/usr/bin/app")  // Skip if installed
+porter.GitClone(repo, "/opt/app").Creates("/opt/app")    // Skip if already cloned
 ```
 
 ## Variables

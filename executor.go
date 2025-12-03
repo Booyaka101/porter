@@ -82,6 +82,18 @@ func (e *Executor) runTask(num, total int, task Task, vars *Vars, stats *Stats) 
 		return nil
 	}
 
+	// Check Creates condition - skip if path exists
+	if task.Creates != "" {
+		creates := vars.Expand(task.Creates)
+		if _, err := e.client.Run("test -e " + creates); err == nil {
+			if e.verbose {
+				log.Printf("  \033[36m...skipped (exists: %s)\033[0m", creates)
+			}
+			stats.Skipped++
+			return nil
+		}
+	}
+
 	// Execute with retry support
 	var err error
 	attempts := 1
@@ -199,7 +211,7 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 			owner = vars.Get("default_owner")
 		}
 		if owner == "" {
-			owner = "idx:idx"
+			owner = "root:root"
 		}
 		flag := ""
 		if t.Rec {

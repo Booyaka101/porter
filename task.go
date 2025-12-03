@@ -20,6 +20,7 @@ type Task struct {
 	Delay    time.Duration // Delay between retries
 	Timeout  time.Duration // Timeout for wait operations
 	Register string        // Variable name to store output
+	Creates  string        // Skip if this path exists
 }
 
 // Stats holds execution statistics.

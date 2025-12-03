@@ -31,4 +31,5 @@
 //   - Systemd service management
 //   - Docker and Docker Compose support
 //   - Variable expansion in commands and files
+//   - Idempotent operations with Creates() to skip if path exists
 package porter

@@ -282,7 +282,7 @@ func TestDSL_Docker(t *testing.T) {
 }
 
 func TestDSL_Compose(t *testing.T) {
-	task := Compose("/home/idx").Up().Build()
+	task := Compose("/app").Up().Build()
 	if task.Action != "compose" {
 		t.Errorf("expected action 'compose', got '%s'", task.Action)
 	}
@@ -290,7 +290,7 @@ func TestDSL_Compose(t *testing.T) {
 		t.Errorf("expected state 'up', got '%s'", task.State)
 	}
 
-	task = Compose("/home/idx").Down().Build()
+	task = Compose("/app").Down().Build()
 	if task.State != "down" {
 		t.Errorf("expected state 'down', got '%s'", task.State)
 	}
@@ -386,6 +386,19 @@ func TestTaskBuilder_Loop(t *testing.T) {
 	}
 }
 
+func TestTaskBuilder_Creates(t *testing.T) {
+	task := Mkdir("/var/data").Creates("/var/data").Build()
+	if task.Creates != "/var/data" {
+		t.Errorf("expected creates '/var/data', got '%s'", task.Creates)
+	}
+
+	// Test with variable expansion path
+	task = Install("/tmp/game", "/usr/bin/game").Creates("/usr/bin/game").Build()
+	if task.Creates != "/usr/bin/game" {
+		t.Errorf("expected creates '/usr/bin/game', got '%s'", task.Creates)
+	}
+}
+
 func TestTaskBuilder_Name(t *testing.T) {
 	task := Run("echo hello").Name("Say hello").Build()
 	if task.Name != "Say hello" {
@@ -443,11 +456,11 @@ func TestManifest_DeploymentPattern(t *testing.T) {
 
 	tasks := Tasks(
 		// File operations
-		Upload("/local/binary", "/home/idx/game").Name("Upload game binary"),
-		Chmod("/home/idx/game").Mode("755"),
+		Upload("/local/binary", "/opt/game").Name("Upload game binary"),
+		Chmod("/opt/game").Mode("755"),
 
 		// Template
-		Template("/etc/systemd/user/game.service", "ExecStart=/home/idx/game -game={{game_type}}"),
+		Template("/etc/systemd/user/game.service", "ExecStart=/opt/game -game={{game_type}}"),
 
 		// Service management
 		DaemonReload().User(),
@@ -503,8 +516,8 @@ func TestManifest_WibuFetchPattern(t *testing.T) {
 func TestManifest_WibuApplyPattern(t *testing.T) {
 	// Test Wibu license apply pattern
 	tasks := Tasks(
-		UploadBytes("renew_data", "/home/idx/renew"),
-		WibuApply("/home/idx/renew"),
+		UploadBytes("renew_data", "/tmp/renew"),
+		WibuApply("/tmp/renew"),
 	)
 
 	if len(tasks) != 2 {
