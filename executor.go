@@ -249,13 +249,6 @@ func (e *Executor) runLocal(cmd string) error {
 	return nil
 }
 
-// runLocalCapture executes a command locally and returns the output
-func (e *Executor) runLocalCapture(cmd string) (string, error) {
-	c := exec.Command("sh", "-c", cmd)
-	out, err := c.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
-}
-
 // getSSHDestination returns the SSH destination string (user@host) for rsync
 func (e *Executor) getSSHDestination() string {
 	return e.client.Config.User + "@" + e.client.Config.Addr

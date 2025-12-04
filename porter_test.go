@@ -440,6 +440,15 @@ func TestStats(t *testing.T) {
 	if stats.OK != 7 {
 		t.Errorf("expected OK 7, got %d", stats.OK)
 	}
+	if stats.Changed != 2 {
+		t.Errorf("expected Changed 2, got %d", stats.Changed)
+	}
+	if stats.Skipped != 1 {
+		t.Errorf("expected Skipped 1, got %d", stats.Skipped)
+	}
+	if stats.Failed != 0 {
+		t.Errorf("expected Failed 0, got %d", stats.Failed)
+	}
 }
 
 // =============================================================================

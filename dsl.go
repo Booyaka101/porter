@@ -607,7 +607,7 @@ func Rsync(src, dest string) RsyncBuilder {
 }
 
 // Build returns a TaskBuilder for use with Tasks()
-func (r RsyncBuilder) Build() TaskBuilder { return TaskBuilder{r.t} }
+func (r RsyncBuilder) Build() TaskBuilder { return TaskBuilder(struct{ t Task }(r)) }
 
 // Name sets a custom name for the task
 func (r RsyncBuilder) Name(n string) RsyncBuilder { r.t.Name = n; return r }
