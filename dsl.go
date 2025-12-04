@@ -673,6 +673,17 @@ func (r RsyncBuilder) Fast() RsyncBuilder {
 	return r.appendOpt("inplace", "true").appendOpt("delta", "true")
 }
 
+// Local runs rsync on the local machine instead of remote, syncing local files to remote via SSH.
+// This is useful for Docker environments where you can't SSH into the container.
+// The destination path will be prefixed with user@host: automatically.
+func (r RsyncBuilder) Local() RsyncBuilder { return r.appendOpt("local", "true") }
+
+// SSHPort sets a custom SSH port for local-to-remote rsync (only used with Local())
+func (r RsyncBuilder) SSHPort(port string) RsyncBuilder { return r.appendOpt("ssh-port", port) }
+
+// SSHKey sets the SSH key path for local-to-remote rsync (only used with Local())
+func (r RsyncBuilder) SSHKey(keyPath string) RsyncBuilder { return r.appendOpt("ssh-key", keyPath) }
+
 // RsyncInstall installs rsync on the remote system using the appropriate package manager
 func RsyncInstall() TaskBuilder {
 	return TaskBuilder{Task{Action: "rsync_install", Name: "Install rsync"}}

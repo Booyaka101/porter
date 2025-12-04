@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -236,6 +237,28 @@ func (e *Executor) parseOpt(opts, key string) string {
 		}
 	}
 	return ""
+}
+
+// runLocal executes a command on the local machine
+func (e *Executor) runLocal(cmd string) error {
+	c := exec.Command("sh", "-c", cmd)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// runLocalCapture executes a command locally and returns the output
+func (e *Executor) runLocalCapture(cmd string) (string, error) {
+	c := exec.Command("sh", "-c", cmd)
+	out, err := c.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// getSSHDestination returns the SSH destination string (user@host) for rsync
+func (e *Executor) getSSHDestination() string {
+	return e.client.Config.User + "@" + e.client.Config.Addr
 }
 
 // =============================================================================
@@ -947,6 +970,9 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 	partial := false
 	inplace := false
 	delta := false
+	local := false // Run rsync locally (local-to-remote sync)
+	sshPort := ""  // Custom SSH port for local mode
+	sshKey := ""   // SSH key path for local mode
 
 	// Parse options from body (semicolon-separated key:value pairs)
 	for _, opt := range strings.Split(opts, ";") {
@@ -984,6 +1010,12 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 			inplace = val == "true" || val == ""
 		case "delta":
 			delta = val == "true" || val == ""
+		case "local":
+			local = val == "true" || val == ""
+		case "ssh-port":
+			sshPort = val
+		case "ssh-key":
+			sshKey = val
 		}
 	}
 
@@ -1030,6 +1062,26 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 			}
 		}
 	}
+
+	// Local-to-remote mode: run rsync on local machine with SSH destination
+	if local {
+		// Build SSH options for rsync
+		sshOpts := "ssh"
+		if sshPort != "" {
+			sshOpts += " -p " + sshPort
+		}
+		if sshKey != "" {
+			sshOpts += " -i " + sshKey
+		}
+		sshOpts += " -o StrictHostKeyChecking=no"
+		cmd += " -e \"" + sshOpts + "\""
+
+		// Format: rsync [opts] local_src user@host:remote_dest
+		cmd += " " + src + " " + e.getSSHDestination() + ":" + dest
+		return e.runLocal(cmd)
+	}
+
+	// Remote mode: run rsync on remote machine
 	cmd += " " + src + " " + dest
 
 	if sudo {

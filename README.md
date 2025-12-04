@@ -142,6 +142,15 @@ porter.Rsync("./src/", "/dest/").
     Sudo().                        // Run with sudo
     Build()
 
+// Local-to-remote sync (runs rsync on local machine with SSH destination)
+// Useful for Docker environments where you can't SSH into the container
+porter.Rsync("/local/path/", "/remote/path/").
+    Local().                       // Run rsync locally, sync to remote via SSH
+    SSHPort("2222").               // Custom SSH port (optional)
+    SSHKey("~/.ssh/id_rsa").       // SSH key path (optional)
+    Delete().
+    Build()
+
 // Custom flags
 porter.Rsync("./src/", "/dest/").Flags("-rlptD").NoCompress().Build()
 ```
