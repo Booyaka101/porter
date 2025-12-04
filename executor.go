@@ -12,10 +12,11 @@ import (
 
 // Executor runs tasks on a remote server.
 type Executor struct {
-	client   *goph.Client
-	password string
-	verbose  bool
-	dryRun   bool
+	client     *goph.Client
+	password   string
+	verbose    bool
+	dryRun     bool
+	onProgress ProgressFunc
 }
 
 // NewExecutor creates a new Executor.
@@ -29,6 +30,9 @@ func (e *Executor) SetVerbose(v bool) *Executor { e.verbose = v; return e }
 // SetDryRun enables or disables dry-run mode.
 func (e *Executor) SetDryRun(v bool) *Executor { e.dryRun = v; return e }
 
+// OnProgress sets a callback function that is called for each task state change.
+func (e *Executor) OnProgress(fn ProgressFunc) *Executor { e.onProgress = fn; return e }
+
 // Run executes a list of tasks.
 func (e *Executor) Run(name string, tasks []Task, vars *Vars) (*Stats, error) {
 	stats := &Stats{Total: len(tasks)}
@@ -38,15 +42,24 @@ func (e *Executor) Run(name string, tasks []Task, vars *Vars) (*Stats, error) {
 	}
 
 	for i, task := range tasks {
+		taskName := vars.Expand(task.Name)
+
 		if task.When != nil && !task.When(vars) {
 			stats.Skipped++
+			e.emitProgress(TaskProgress{
+				Index:  i,
+				Total:  len(tasks),
+				Name:   taskName,
+				Action: task.Action,
+				Status: StatusSkipped,
+			})
 			continue
 		}
 
 		if len(task.Loop) > 0 {
 			for _, item := range task.Loop {
 				vars.Item = item
-				if err := e.runTask(i+1, stats.Total, task, vars, stats); err != nil && !task.Ignore {
+				if err := e.runTask(i, task, vars, stats); err != nil && !task.Ignore {
 					return stats, err
 				}
 			}
@@ -54,7 +67,7 @@ func (e *Executor) Run(name string, tasks []Task, vars *Vars) (*Stats, error) {
 			continue
 		}
 
-		if err := e.runTask(i+1, stats.Total, task, vars, stats); err != nil && !task.Ignore {
+		if err := e.runTask(i, task, vars, stats); err != nil && !task.Ignore {
 			return stats, err
 		}
 	}
@@ -66,8 +79,35 @@ func (e *Executor) Run(name string, tasks []Task, vars *Vars) (*Stats, error) {
 	return stats, nil
 }
 
-func (e *Executor) runTask(num, total int, task Task, vars *Vars, stats *Stats) error {
+// emitProgress calls the progress callback if set
+func (e *Executor) emitProgress(p TaskProgress) {
+	if e.onProgress != nil {
+		e.onProgress(p)
+	}
+}
+
+func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 	name := vars.Expand(task.Name)
+	total := stats.Total
+	num := idx + 1
+
+	// Calculate max attempts
+	maxAttempts := 1
+	if task.Retry > 0 {
+		maxAttempts = task.Retry + 1
+	}
+
+	// Create progress tracker
+	progress := TaskProgress{
+		Index:      idx,
+		Total:      total,
+		Name:       name,
+		Action:     task.Action,
+		Status:     StatusRunning,
+		Attempt:    1,
+		MaxAttempt: maxAttempts,
+		StartTime:  time.Now(),
+	}
 
 	if e.verbose {
 		mode := ""
@@ -77,8 +117,14 @@ func (e *Executor) runTask(num, total int, task Task, vars *Vars, stats *Stats) 
 		log.Printf("\033[1;33mTASK [%d/%d]\033[0m %s%s", num, total, name, mode)
 	}
 
+	// Emit running status
+	e.emitProgress(progress)
+
 	if e.dryRun {
 		stats.OK++
+		progress.Status = StatusOK
+		progress.Duration = time.Since(progress.StartTime)
+		e.emitProgress(progress)
 		return nil
 	}
 
@@ -90,33 +136,44 @@ func (e *Executor) runTask(num, total int, task Task, vars *Vars, stats *Stats) 
 				log.Printf("  \033[36m...skipped (exists: %s)\033[0m", creates)
 			}
 			stats.Skipped++
+			progress.Status = StatusSkipped
+			progress.Duration = time.Since(progress.StartTime)
+			e.emitProgress(progress)
 			return nil
 		}
 	}
 
 	// Execute with retry support
 	var err error
-	attempts := 1
-	if task.Retry > 0 {
-		attempts = task.Retry + 1
-	}
 	delay := task.Delay
 	if delay == 0 {
 		delay = 2 * time.Second
 	}
 
-	for i := 0; i < attempts; i++ {
+	for i := 0; i < maxAttempts; i++ {
+		progress.Attempt = i + 1
+
 		if i > 0 {
+			progress.Status = StatusRetrying
+			e.emitProgress(progress)
+
 			if e.verbose {
 				log.Printf("  \033[33mRetrying (%d/%d)...\033[0m", i, task.Retry)
 			}
 			time.Sleep(delay)
+
+			progress.Status = StatusRunning
+			e.emitProgress(progress)
 		}
+
 		err = e.exec(task, vars)
 		if err == nil {
 			break
 		}
+		progress.Error = err
 	}
+
+	progress.Duration = time.Since(progress.StartTime)
 
 	if err != nil {
 		if task.Ignore {
@@ -124,17 +181,24 @@ func (e *Executor) runTask(num, total int, task Task, vars *Vars, stats *Stats) 
 				log.Printf("  \033[33m...ignoring\033[0m")
 			}
 			stats.OK++
+			progress.Status = StatusOK
+			progress.Error = nil
+			e.emitProgress(progress)
 			return nil
 		}
 		if e.verbose {
 			log.Printf("  \033[1;31mFAILED\033[0m: %v", err)
 		}
 		stats.Failed++
+		progress.Status = StatusFailed
+		e.emitProgress(progress)
 		return fmt.Errorf("%s: %w", name, err)
 	}
 
 	stats.OK++
 	stats.Changed++
+	progress.Status = StatusChanged
+	e.emitProgress(progress)
 	return nil
 }
 
@@ -439,11 +503,28 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 
 	// Rsync
 	case "rsync":
-		flags := "-avz --delete"
-		if body != "" {
-			flags = body
+		return e.rsyncExec(src, dest, body, t.Sudo)
+	case "rsync_install":
+		return e.rsyncInstall()
+	case "rsync_check":
+		installed := e.rsyncCheck()
+		if t.Register != "" {
+			if installed {
+				vars.Set(t.Register, "true")
+			} else {
+				vars.Set(t.Register, "false")
+			}
 		}
-		return e.run("rsync " + flags + " " + src + " " + dest)
+		return nil
+	case "rsync_version":
+		out, err := e.runCapture("rsync --version | head -1")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
 
 	// Nginx
 	case "nginx_test":
@@ -808,4 +889,151 @@ func (e *Executor) sftpWrite(path string, data []byte) error {
 		return fmt.Errorf("write remote file failed: %w", err)
 	}
 	return nil
+}
+
+// =============================================================================
+// RSYNC HELPERS
+// =============================================================================
+
+// rsyncCheck checks if rsync is installed
+func (e *Executor) rsyncCheck() bool {
+	return e.run("which rsync") == nil
+}
+
+// rsyncInstall installs rsync using the appropriate package manager
+func (e *Executor) rsyncInstall() error {
+	// Try to detect package manager and install rsync
+	// Check for apt (Debian/Ubuntu)
+	if e.run("which apt-get") == nil {
+		if err := e.runSudo("apt-get update"); err != nil {
+			return fmt.Errorf("apt update failed: %w", err)
+		}
+		return e.runSudo("apt-get install -y rsync")
+	}
+	// Check for yum (RHEL/CentOS)
+	if e.run("which yum") == nil {
+		return e.runSudo("yum install -y rsync")
+	}
+	// Check for dnf (Fedora)
+	if e.run("which dnf") == nil {
+		return e.runSudo("dnf install -y rsync")
+	}
+	// Check for pacman (Arch)
+	if e.run("which pacman") == nil {
+		return e.runSudo("pacman -S --noconfirm rsync")
+	}
+	// Check for apk (Alpine)
+	if e.run("which apk") == nil {
+		return e.runSudo("apk add rsync")
+	}
+	// Check for zypper (openSUSE)
+	if e.run("which zypper") == nil {
+		return e.runSudo("zypper install -y rsync")
+	}
+	return fmt.Errorf("no supported package manager found")
+}
+
+// rsyncExec executes rsync with the given options
+func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
+	flags := "-avz"
+	exclude := ""
+	include := ""
+	delete := false
+	compress := true
+	progress := false
+	dryRun := false
+	bwLimit := ""
+	checksum := false
+	partial := false
+	inplace := false
+	delta := false
+
+	// Parse options from body (semicolon-separated key:value pairs)
+	for _, opt := range strings.Split(opts, ";") {
+		if opt == "" {
+			continue
+		}
+		parts := strings.SplitN(opt, ":", 2)
+		key := parts[0]
+		val := ""
+		if len(parts) == 2 {
+			val = parts[1]
+		}
+		switch key {
+		case "flags":
+			flags = val
+		case "exclude":
+			exclude = val
+		case "include":
+			include = val
+		case "delete":
+			delete = val == "true" || val == ""
+		case "compress":
+			compress = val == "true" || val == ""
+		case "progress":
+			progress = val == "true" || val == ""
+		case "dry-run":
+			dryRun = val == "true" || val == ""
+		case "bwlimit":
+			bwLimit = val
+		case "checksum":
+			checksum = val == "true" || val == ""
+		case "partial":
+			partial = val == "true" || val == ""
+		case "inplace":
+			inplace = val == "true" || val == ""
+		case "delta":
+			delta = val == "true" || val == ""
+		}
+	}
+
+	// Build command
+	cmd := "rsync " + flags
+	if !compress {
+		cmd = strings.Replace(cmd, "z", "", 1)
+	}
+	if delete {
+		cmd += " --delete"
+	}
+	if progress {
+		cmd += " --progress"
+	}
+	if dryRun {
+		cmd += " --dry-run"
+	}
+	if checksum {
+		cmd += " --checksum"
+	}
+	if partial {
+		cmd += " --partial"
+	}
+	if inplace {
+		cmd += " --inplace"
+	}
+	if delta {
+		cmd += " --no-whole-file"
+	}
+	if bwLimit != "" {
+		cmd += " --bwlimit=" + bwLimit
+	}
+	if exclude != "" {
+		for _, ex := range strings.Split(exclude, ",") {
+			if ex != "" {
+				cmd += " --exclude='" + ex + "'"
+			}
+		}
+	}
+	if include != "" {
+		for _, inc := range strings.Split(include, ",") {
+			if inc != "" {
+				cmd += " --include='" + inc + "'"
+			}
+		}
+	}
+	cmd += " " + src + " " + dest
+
+	if sudo {
+		return e.runSudo(cmd)
+	}
+	return e.run(cmd)
 }

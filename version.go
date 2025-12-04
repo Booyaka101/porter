@@ -1,4 +1,4 @@
 package porter
 
 // Version is the current version of Porter.
-const Version = "0.2.0"
+const Version = "0.3.0"

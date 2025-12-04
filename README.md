@@ -117,6 +117,35 @@ porter.Compose("/path").Down()     // docker compose down
 porter.Compose("/path").Pull()     // docker compose pull
 ```
 
+### Rsync
+
+```go
+// Ensure rsync is installed
+porter.RsyncInstall()              // Auto-detect package manager
+porter.RsyncCheck()                // Check if installed
+porter.RsyncVersion()              // Get version
+porter.RsyncEnsure()               // Install only if missing
+
+// Basic sync
+porter.Rsync("./src/", "/dest/").Build()
+
+// With options
+porter.Rsync("./src/", "/dest/").
+    Delete().                      // Remove extraneous files
+    Exclude("*.log,*.tmp,.git").   // Exclude patterns
+    Include("*.go,*.mod").         // Include patterns
+    Progress().                    // Show progress
+    Checksum().                    // Use checksum verification
+    Partial().                     // Keep partial files
+    BwLimit("1000").               // Bandwidth limit (KB/s)
+    DryRun().                      // Preview only
+    Sudo().                        // Run with sudo
+    Build()
+
+// Custom flags
+porter.Rsync("./src/", "/dest/").Flags("-rlptD").NoCompress().Build()
+```
+
 ### Wait/Health Checks
 
 ```go
@@ -176,6 +205,42 @@ vars.Expand("Hello {{key}}")       // Expand variables in string
 vars.Clear()                       // Clear all variables
 ```
 
+## Progress Tracking
+
+Track task progress with callbacks:
+
+```go
+executor := porter.NewExecutor(client, password)
+
+// Set progress callback
+executor.OnProgress(func(p porter.TaskProgress) {
+    // p.Index      - 0-based task index
+    // p.Total      - Total number of tasks
+    // p.Name       - Task name
+    // p.Action     - Task action type
+    // p.Status     - pending, running, ok, changed, skipped, failed, retrying
+    // p.Attempt    - Current attempt (1-based)
+    // p.MaxAttempt - Max attempts
+    // p.Duration   - Time taken (on completion)
+    // p.Error      - Error if failed
+    
+    // Built-in helpers
+    fmt.Printf("%s %s\n", p.ProgressBar(30), p.String())
+})
+
+stats, err := executor.Run("Deploy", tasks, vars)
+```
+
+### TaskProgress Status Values
+
+- **`pending`** - Task not yet started
+- **`running`** - Task currently executing
+- **`retrying`** - Task failed, retrying
+- **`ok`** - Task completed successfully (no changes)
+- **`changed`** - Task completed with changes
+- **`skipped`** - Task skipped (condition not met or Creates path exists)
+- **`failed`** - Task failed
+
 ## Example: Full Deployment Manifest
 
 ```go
@@ -223,6 +288,7 @@ See the [examples](./examples) directory for complete working examples:
 - **[basic](./examples/basic)** - Simple deployment workflow
 - **[docker](./examples/docker)** - Docker and Docker Compose management
 - **[conditional](./examples/conditional)** - Conditions, loops, and variable expansion
+- **[rsync](./examples/rsync)** - File synchronization with rsync
 
 ## Contributing
 
