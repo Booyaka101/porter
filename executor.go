@@ -1058,16 +1058,22 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 
 	// Local-to-remote mode: run rsync on local machine with SSH destination
 	if local {
-		// Build SSH options for rsync
-		sshOpts := "ssh"
+		// Build SSH command with sshpass for password authentication
+		sshCmd := "ssh"
 		if sshPort != "" {
-			sshOpts += " -p " + sshPort
+			sshCmd += " -p " + sshPort
 		}
 		if sshKey != "" {
-			sshOpts += " -i " + sshKey
+			sshCmd += " -i " + sshKey
 		}
-		sshOpts += " -o StrictHostKeyChecking=no"
-		cmd += " -e \"" + sshOpts + "\""
+		sshCmd += " -o StrictHostKeyChecking=no"
+
+		// Use sshpass if password is available and no SSH key specified
+		if e.password != "" && sshKey == "" {
+			cmd = "sshpass -p '" + e.password + "' " + cmd + " -e \"" + sshCmd + "\""
+		} else {
+			cmd += " -e \"" + sshCmd + "\""
+		}
 
 		// Format: rsync [opts] local_src user@host:remote_dest
 		cmd += " " + src + " " + e.getSSHDestination() + ":" + dest
