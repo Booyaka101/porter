@@ -414,6 +414,8 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 		return e.runSudo("systemctl daemon-reload")
 	case "template":
 		return e.installTemplate(dest, body, t.User)
+	case "journal":
+		return e.journalCtl(dest, body, t.User, t.Sudo, t.Register, vars)
 
 	// Docker images
 	case "docker_pull":
@@ -648,6 +650,46 @@ func (e *Executor) installTemplate(name, content string, user bool) error {
 		target = "/etc/systemd/user/" + filename
 	}
 	return e.runSudo("cp " + filename + " " + target)
+}
+
+func (e *Executor) journalCtl(unit, flags string, user, sudo bool, register string, vars *Vars) error {
+	cmd := "journalctl"
+
+	if user {
+		cmd += " --user"
+	}
+
+	if unit != "" {
+		cmd += " -u " + unit
+	}
+
+	if flags != "" {
+		cmd += " " + flags
+	}
+
+	// Always add --no-pager if not already present to avoid interactive pager
+	if !strings.Contains(flags, "--no-pager") && !strings.Contains(flags, "-f") {
+		cmd += " --no-pager"
+	}
+
+	var out string
+	var err error
+
+	if sudo {
+		out, err = e.runSudoCapture(cmd)
+	} else {
+		out, err = e.runCapture(cmd)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if register != "" {
+		vars.Set(register, out)
+	}
+
+	return nil
 }
 
 // =============================================================================
