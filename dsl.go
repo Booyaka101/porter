@@ -312,6 +312,130 @@ func Template(name, content string) TaskBuilder {
 }
 
 // =============================================================================
+// JOURNALCTL (SYSTEMD LOGS)
+// =============================================================================
+
+// Journal returns a TaskBuilder for retrieving all system journal logs
+func Journal() TaskBuilder {
+	return TaskBuilder{Task{Action: "journal", Name: "Journal logs"}}
+}
+
+// JournalUnit returns a TaskBuilder for retrieving logs for a specific systemd unit
+func JournalUnit(unit string) TaskBuilder {
+	return TaskBuilder{Task{Action: "journal", Dest: unit, Name: "Journal logs for " + unit}}
+}
+
+// Journal-specific methods for TaskBuilder
+
+// Lines limits the number of log lines to retrieve
+func (b TaskBuilder) Lines(n string) TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "-n "+n)
+	return b
+}
+
+// Follow enables real-time log following (use with caution in automation)
+func (b TaskBuilder) Follow() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "-f")
+	return b
+}
+
+// Since filters logs from a specific time (e.g., "2024-12-11 10:00:00", "1 hour ago")
+func (b TaskBuilder) Since(time string) TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "--since="+shellEscape(time))
+	return b
+}
+
+// Until filters logs until a specific time
+func (b TaskBuilder) Until(time string) TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "--until="+shellEscape(time))
+	return b
+}
+
+// Priority filters logs by priority level (emerg, alert, crit, err, warning, notice, info, debug)
+func (b TaskBuilder) Priority(level string) TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "-p "+level)
+	return b
+}
+
+// Grep filters logs matching a pattern
+func (b TaskBuilder) Grep(pattern string) TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "--grep="+shellEscape(pattern))
+	return b
+}
+
+// Reverse shows newest entries first
+func (b TaskBuilder) Reverse() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "-r")
+	return b
+}
+
+// NoPager disables pager output
+func (b TaskBuilder) NoPager() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "--no-pager")
+	return b
+}
+
+// Output sets the output format (short, json, json-pretty, verbose, cat, etc.)
+func (b TaskBuilder) Output(format string) TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "-o "+format)
+	return b
+}
+
+// Boot shows logs from a specific boot (empty string for current boot)
+func (b TaskBuilder) Boot(id string) TaskBuilder {
+	if id == "" {
+		b.t.Body = appendJournalFlag(b.t.Body, "-b")
+	} else {
+		b.t.Body = appendJournalFlag(b.t.Body, "-b "+id)
+	}
+	return b
+}
+
+// Kernel shows kernel logs only
+func (b TaskBuilder) Kernel() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "-k")
+	return b
+}
+
+// Dmesg shows kernel ring buffer (similar to dmesg command)
+func (b TaskBuilder) Dmesg() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "--dmesg")
+	return b
+}
+
+// System shows system logs explicitly
+func (b TaskBuilder) System() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "--system")
+	return b
+}
+
+// UTC shows timestamps in UTC
+func (b TaskBuilder) UTC() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "--utc")
+	return b
+}
+
+// Catalog adds explanatory help texts to log messages
+func (b TaskBuilder) Catalog() TaskBuilder {
+	b.t.Body = appendJournalFlag(b.t.Body, "-x")
+	return b
+}
+
+// appendJournalFlag is a helper to append flags to the Body field
+func appendJournalFlag(current, flag string) string {
+	if current == "" {
+		return flag
+	}
+	return current + " " + flag
+}
+
+// shellEscape escapes a string for safe use in shell commands
+func shellEscape(s string) string {
+	// Replace single quotes with '\'' which closes the quote, adds an escaped quote, and reopens
+	return "'" + strings.Replace(s, "'", "'\\''", -1) + "'"
+}
+
+// =============================================================================
 // DOCKER IMAGES
 // =============================================================================
 

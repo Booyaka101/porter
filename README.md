@@ -63,6 +63,7 @@ func main() {
 - **Health Checks** - Wait for ports, HTTP endpoints, or files
 - **Output Capture** - Store command output in variables
 - **Systemd Integration** - Manage services (user and system)
+- **Journalctl Support** - Retrieve and analyze systemd logs with shell injection protection
 - **Docker Support** - Container and Compose management
 - **Template Expansion** - Variable substitution in files and commands
 - **Idempotent Operations** - Skip tasks when target path exists with `Creates()`
@@ -102,6 +103,39 @@ porter.Svc("nginx").Enable()       // Enable service
 porter.Svc("app").Start().User()   // User service (systemctl --user)
 porter.DaemonReload()              // Reload systemd
 ```
+
+### Logs (Journalctl)
+
+```go
+// Get logs for a specific service
+porter.JournalUnit("nginx").Lines("100").Sudo().Register("logs")
+
+// Filter by time and priority
+porter.JournalUnit("myapp").
+    Since("1 hour ago").
+    Priority("err").
+    Sudo().
+    Register("errors")
+
+// Search logs with pattern (shell-escaped)
+porter.JournalUnit("docker").Grep("error|failed").Lines("200").Sudo()
+
+// Kernel logs
+porter.Journal().Kernel().Lines("50").Sudo()
+
+// JSON output for parsing
+porter.JournalUnit("app").Output("json").Lines("10").Sudo()
+
+// Additional options
+.Boot("")              // Current boot logs
+.Reverse()             // Newest first
+.UTC()                 // UTC timestamps
+.Catalog()             // Add explanatory help texts
+.Dmesg()               // Kernel ring buffer
+.User()                // User-level systemd
+```
+
+See [JOURNALCTL_EXAMPLES.md](./JOURNALCTL_EXAMPLES.md) for comprehensive examples and troubleshooting patterns.
 
 ### Docker
 
