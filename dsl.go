@@ -943,3 +943,139 @@ func Tasks(builders ...TaskBuilder) []Task {
 	}
 	return tasks
 }
+
+// =============================================================================
+// SYSTEMD SERVICE FILE MANAGEMENT
+// =============================================================================
+
+// EscapeSed escapes special characters for sed replacement strings.
+// Use this when passing dynamic values to Sed() to avoid syntax errors.
+func EscapeSed(value string) string {
+	v := strings.ReplaceAll(value, `\`, `\\`)
+	v = strings.ReplaceAll(v, `&`, `\&`)
+	v = strings.ReplaceAll(v, `/`, `\/`)
+	return v
+}
+
+// UpdateServiceParam creates a sed pattern that updates a systemd service parameter
+// while preserving its existing quote style (quoted vs unquoted).
+// For example, updating -port=3099 or -port="3099" will preserve the original format.
+// The pattern matches: -paramName="value" or -paramName=value
+func UpdateServiceParam(paramName, newValue string) string {
+	escaped := EscapeSed(newValue)
+	// Pattern explanation:
+	// s%                    - sed substitute command with % delimiter
+	// -paramName=           - literal match of parameter
+	// \("\{0,1\}\)          - capture group 1: optional quote (0 or 1 times)
+	// \([^" ]*\)            - capture group 2: the value (non-quote, non-space chars)
+	// \1                    - back-reference to match closing quote if opening existed
+	// -paramName=\1...\1    - replacement preserving quote style
+	// %g                    - global flag
+	return `s%-` + paramName + `=\("\{0,1\}\)\([^" ]*\)\1%-` + paramName + `=\1` + escaped + `\1%g`
+}
+
+// UpdateServiceParamTask creates a TaskBuilder that updates a systemd service parameter
+// in the specified file while preserving quote style.
+func UpdateServiceParamTask(servicePath, paramName, newValue string) TaskBuilder {
+	pattern := UpdateServiceParam(paramName, newValue)
+	return Sed(pattern, servicePath).Name("Update " + paramName + " in " + servicePath)
+}
+
+// ServiceFileConfig defines configuration for managing a systemd service file.
+type ServiceFileConfig struct {
+	Name      string            // Service name (e.g., "myapp", "worker")
+	Template  string            // Service file template content
+	IsUser    bool              // true for user services (~/.config/systemd/user/), false for system (/etc/systemd/system/)
+	Params    map[string]string // Parameters to update if service file exists (key=param name, value=new value)
+	NeedsSudo bool              // true if template creation needs sudo (always true for system services; sed updates always use sudo)
+}
+
+// servicePath returns the full path to the service file based on IsUser flag.
+// For user services: ~/.config/systemd/user/<name>.service
+// For system services: /etc/systemd/system/<name>.service
+func (c ServiceFileConfig) servicePath() string {
+	if c.IsUser {
+		return "~/.config/systemd/user/" + c.Name + ".service"
+	}
+	return "/etc/systemd/system/" + c.Name + ".service"
+}
+
+// ManageServiceFile creates a task group that idempotently manages a systemd service file:
+// 1. Checks if the service file exists
+// 2. Creates from template if missing
+// 3. Updates parameters if the file exists
+//
+// The returned tasks use a variable named "<serviceName>_service_exists" to track state.
+// For user services, tasks are configured with .User(). For system services, tasks use .Sudo().
+//
+// Example usage:
+//
+//	tasks := porter.ManageServiceFile(porter.ServiceFileConfig{
+//	    Name:     "myapp",
+//	    Template: appServiceTemplate,
+//	    IsUser:   true,
+//	    Params: map[string]string{
+//	        "port": "8080",
+//	        "host": "0.0.0.0",
+//	    },
+//	})
+func ManageServiceFile(cfg ServiceFileConfig) []Task {
+	servicePath := cfg.servicePath()
+	existsVar := cfg.Name + "_service_exists"
+
+	var builders []TaskBuilder
+
+	// 1. Check if service file exists
+	builders = append(builders,
+		FileExists(servicePath).Register(existsVar).Name("Check if "+cfg.Name+" service exists"),
+	)
+
+	// 2. Create from template if missing
+	// System services always need sudo; user services need sudo if NeedsSudo is set
+	needsSudo := !cfg.IsUser || cfg.NeedsSudo
+	createTask := Template(servicePath, cfg.Template).Name("Create " + cfg.Name + " service file")
+	if cfg.IsUser {
+		createTask = createTask.User()
+	}
+	if needsSudo {
+		createTask = createTask.Sudo()
+	}
+	createTask = createTask.When(IfEquals(existsVar, "false"))
+	builders = append(builders, createTask)
+
+	// 3. Update parameters if file exists
+	for paramName, paramValue := range cfg.Params {
+		updateTask := UpdateServiceParamTask(servicePath, paramName, paramValue)
+		if needsSudo {
+			updateTask = updateTask.Sudo()
+		}
+		updateTask = updateTask.When(IfEquals(existsVar, "true"))
+		builders = append(builders, updateTask)
+	}
+
+	return Tasks(builders...)
+}
+
+// ManageServiceFileWithReload is like ManageServiceFile but also adds daemon-reload
+// and service restart tasks at the end.
+func ManageServiceFileWithReload(cfg ServiceFileConfig) []Task {
+	tasks := ManageServiceFile(cfg)
+
+	// Add daemon-reload
+	reloadTask := DaemonReload()
+	if cfg.IsUser {
+		reloadTask = reloadTask.User()
+	} else {
+		reloadTask = reloadTask.Sudo()
+	}
+
+	// Add service restart
+	restartTask := Svc(cfg.Name).Restart()
+	if cfg.IsUser {
+		restartTask = restartTask.User()
+	} else {
+		restartTask = restartTask.Sudo()
+	}
+
+	return append(tasks, Tasks(reloadTask, restartTask)...)
+}

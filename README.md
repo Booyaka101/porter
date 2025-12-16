@@ -104,6 +104,39 @@ porter.Svc("app").Start().User()   // User service (systemctl --user)
 porter.DaemonReload()              // Reload systemd
 ```
 
+### Service File Management
+
+Idempotent helpers for managing systemd service files:
+
+```go
+// Escape special characters for sed replacement strings
+escaped := porter.EscapeSed("/path/with&special")  // "\/path\/with\&special"
+
+// Update a service parameter while preserving quote style
+// Works with both -port=3099 and -port="3099"
+porter.UpdateServiceParamTask("/etc/systemd/system/myapp.service", "port", "8080")
+
+// Full service file management (create if missing, update params if exists)
+tasks := porter.ManageServiceFile(porter.ServiceFileConfig{
+    Name:     "myapp",
+    Template: appServiceTemplate,
+    IsUser:   true,  // ~/.config/systemd/user/ (false = /etc/systemd/system/)
+    Params: map[string]string{
+        "port": "8080",
+        "host": "0.0.0.0",
+    },
+})
+
+// With automatic daemon-reload and service restart
+tasks := porter.ManageServiceFileWithReload(porter.ServiceFileConfig{
+    Name:      "worker",
+    Template:  workerTemplate,
+    IsUser:    false,
+    NeedsSudo: true,  // Use sudo for file operations (always true for system services)
+    Params:    map[string]string{"workers": "4"},
+})
+```
+
 ### Logs (Journalctl)
 
 ```go
@@ -332,6 +365,7 @@ See the [examples](./examples) directory for complete working examples:
 - **[docker](./examples/docker)** - Docker and Docker Compose management
 - **[conditional](./examples/conditional)** - Conditions, loops, and variable expansion
 - **[rsync](./examples/rsync)** - File synchronization with rsync
+- **[systemd](./examples/systemd)** - Systemd service file management
 
 ## Contributing
 
