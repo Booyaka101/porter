@@ -835,3 +835,101 @@ func TestManageServiceFile_NeedsSudo(t *testing.T) {
 		t.Error("expected sed task to have Sudo=true when NeedsSudo=true")
 	}
 }
+
+func TestManageServiceFile_When(t *testing.T) {
+	vars := NewVars()
+	vars.Set("env", "production")
+
+	// Create a condition function
+	isProd := IfEquals("env", "production")
+
+	cfg := ServiceFileConfig{
+		Name:     "myapp",
+		Template: "[Service]\nExecStart=/usr/bin/myapp -port=8080",
+		IsUser:   true,
+		Params:   map[string]string{"port": "9000"},
+		When:     isProd,
+	}
+
+	tasks := ManageServiceFile(cfg)
+
+	// All tasks should have When conditions
+	for i, task := range tasks {
+		if task.When == nil {
+			t.Errorf("task %d should have When condition", i)
+			continue
+		}
+	}
+
+	// First task (file_exists) should have the user's condition applied
+	// It had no internal condition, so it should just be isProd
+	if !tasks[0].When(vars) {
+		t.Error("file_exists task should pass when env=production")
+	}
+
+	// Change env to non-production
+	vars.Set("env", "staging")
+	if tasks[0].When(vars) {
+		t.Error("file_exists task should fail when env=staging")
+	}
+
+	// Test that internal conditions are preserved (combined with And)
+	// The template task has internal condition: IfEquals(existsVar, "false")
+	// Combined: And(isProd, IfEquals(existsVar, "false"))
+	vars.Set("env", "production")
+	vars.Set("myapp_service_exists", "false")
+	if !tasks[1].When(vars) {
+		t.Error("template task should pass when env=production AND service doesn't exist")
+	}
+
+	vars.Set("myapp_service_exists", "true")
+	if tasks[1].When(vars) {
+		t.Error("template task should fail when service exists (even if env=production)")
+	}
+}
+
+func TestManageServiceFileWithReload_When(t *testing.T) {
+	vars := NewVars()
+	vars.Set("env", "production")
+
+	isProd := IfEquals("env", "production")
+
+	cfg := ServiceFileConfig{
+		Name:     "myapp",
+		Template: "[Service]\nExecStart=/usr/bin/myapp",
+		IsUser:   true,
+		Params:   map[string]string{},
+		When:     isProd,
+	}
+
+	tasks := ManageServiceFileWithReload(cfg)
+
+	// Should have 4 tasks: file_exists, template, daemon_reload, restart
+	if len(tasks) != 4 {
+		t.Errorf("expected 4 tasks, got %d", len(tasks))
+	}
+
+	// All tasks should have When conditions
+	for i, task := range tasks {
+		if task.When == nil {
+			t.Errorf("task %d should have When condition", i)
+		}
+	}
+
+	// Reload and restart tasks should respect the condition
+	// They had no internal condition, so they should just be isProd
+	if !tasks[2].When(vars) {
+		t.Error("daemon_reload task should pass when env=production")
+	}
+	if !tasks[3].When(vars) {
+		t.Error("restart task should pass when env=production")
+	}
+
+	vars.Set("env", "staging")
+	if tasks[2].When(vars) {
+		t.Error("daemon_reload task should fail when env=staging")
+	}
+	if tasks[3].When(vars) {
+		t.Error("restart task should fail when env=staging")
+	}
+}

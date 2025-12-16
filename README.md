@@ -125,6 +125,7 @@ tasks := porter.ManageServiceFile(porter.ServiceFileConfig{
         "port": "8080",
         "host": "0.0.0.0",
     },
+    When: porter.IfEquals("env", "production"),  // Optional: condition for all tasks
 })
 
 // With automatic daemon-reload and service restart
@@ -134,6 +135,7 @@ tasks := porter.ManageServiceFileWithReload(porter.ServiceFileConfig{
     IsUser:    false,
     NeedsSudo: true,  // Use sudo for file operations (always true for system services)
     Params:    map[string]string{"workers": "4"},
+    When:      porter.If("deploy_worker"),  // Only deploy if flag is set
 })
 ```
 

@@ -988,6 +988,7 @@ type ServiceFileConfig struct {
 	IsUser    bool              // true for user services (~/.config/systemd/user/), false for system (/etc/systemd/system/)
 	Params    map[string]string // Parameters to update if service file exists (key=param name, value=new value)
 	NeedsSudo bool              // true if template creation needs sudo (always true for system services; sed updates always use sudo)
+	When      When              // Optional condition to apply to all generated tasks (combined with internal conditions via And)
 }
 
 // servicePath returns the full path to the service file based on IsUser flag.
@@ -1018,6 +1019,7 @@ func (c ServiceFileConfig) servicePath() string {
 //	        "port": "8080",
 //	        "host": "0.0.0.0",
 //	    },
+//	    When: porter.IfEquals("env", "production"), // Optional: only run in production
 //	})
 func ManageServiceFile(cfg ServiceFileConfig) []Task {
 	servicePath := cfg.servicePath()
@@ -1053,7 +1055,37 @@ func ManageServiceFile(cfg ServiceFileConfig) []Task {
 		builders = append(builders, updateTask)
 	}
 
-	return Tasks(builders...)
+	tasks := Tasks(builders...)
+
+	// Apply user's condition to all tasks if provided
+	if cfg.When != nil {
+		for i := range tasks {
+			if tasks[i].When != nil {
+				tasks[i].When = And(cfg.When, tasks[i].When)
+			} else {
+				tasks[i].When = cfg.When
+			}
+		}
+	}
+
+	return tasks
+}
+
+// BuildServiceTasks is an alias for ManageServiceFile that makes the conditional
+// execution pattern more explicit. Use this when you want to emphasize that the
+// When condition controls whether the entire service management workflow runs.
+//
+// Example:
+//
+//	tasks := porter.BuildServiceTasks(porter.ServiceFileConfig{
+//	    Name:     "myapp",
+//	    Template: appServiceTemplate,
+//	    IsUser:   true,
+//	    Params:   map[string]string{"port": "8080"},
+//	    When:     porter.IfEquals("env", "production"),
+//	})
+func BuildServiceTasks(cfg ServiceFileConfig) []Task {
+	return ManageServiceFile(cfg)
 }
 
 // ManageServiceFileWithReload is like ManageServiceFile but also adds daemon-reload
@@ -1077,5 +1109,18 @@ func ManageServiceFileWithReload(cfg ServiceFileConfig) []Task {
 		restartTask = restartTask.Sudo()
 	}
 
-	return append(tasks, Tasks(reloadTask, restartTask)...)
+	allTasks := append(tasks, Tasks(reloadTask, restartTask)...)
+
+	// Apply user's condition to reload and restart tasks if provided
+	if cfg.When != nil {
+		for i := len(tasks); i < len(allTasks); i++ {
+			if allTasks[i].When != nil {
+				allTasks[i].When = And(cfg.When, allTasks[i].When)
+			} else {
+				allTasks[i].When = cfg.When
+			}
+		}
+	}
+
+	return allTasks
 }

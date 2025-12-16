@@ -70,6 +70,7 @@ func main() {
 			"port": *port,
 			"mode": *mode,
 		},
+		When: porter.IfEquals("env", "production"), // Only deploy in production
 	})
 
 	// Example 3: With automatic reload and restart
