@@ -262,7 +262,7 @@ func TestDSL_Svc(t *testing.T) {
 	}
 
 	// Test user service
-	task = Svc("game").Start().User().Build()
+	task = Svc("myapp").Start().User().Build()
 	if !task.User {
 		t.Error("expected User to be true")
 	}
@@ -393,9 +393,9 @@ func TestTaskBuilder_Creates(t *testing.T) {
 	}
 
 	// Test with variable expansion path
-	task = Install("/tmp/game", "/usr/bin/game").Creates("/usr/bin/game").Build()
-	if task.Creates != "/usr/bin/game" {
-		t.Errorf("expected creates '/usr/bin/game', got '%s'", task.Creates)
+	task = Install("/tmp/myapp", "/usr/bin/myapp").Creates("/usr/bin/myapp").Build()
+	if task.Creates != "/usr/bin/myapp" {
+		t.Errorf("expected creates '/usr/bin/myapp', got '%s'", task.Creates)
 	}
 }
 
@@ -458,26 +458,26 @@ func TestStats(t *testing.T) {
 func TestManifest_DeploymentPattern(t *testing.T) {
 	// Test that a typical deployment manifest can be built
 	vars := NewVars()
-	vars.Set("game_type", "baccarat")
-	vars.Set("game_variant", "standard")
-	vars.Set("pivot_ip", "192.168.1.100")
-	vars.SetBool("has_collector", true)
+	vars.Set("app_mode", "production")
+	vars.Set("app_version", "1.0.0")
+	vars.Set("server_ip", "192.168.1.100")
+	vars.SetBool("has_worker", true)
 
 	tasks := Tasks(
 		// File operations
-		Upload("/local/binary", "/opt/game").Name("Upload game binary"),
-		Chmod("/opt/game").Mode("755"),
+		Upload("/local/binary", "/opt/myapp").Name("Upload app binary"),
+		Chmod("/opt/myapp").Mode("755"),
 
 		// Template
-		Template("/etc/systemd/user/game.service", "ExecStart=/opt/game -game={{game_type}}"),
+		Template("/etc/systemd/user/myapp.service", "ExecStart=/opt/myapp -mode={{app_mode}}"),
 
 		// Service management
 		DaemonReload().User(),
-		Svc("game").Enable().User(),
-		Svc("game").Start().User().Retry(2),
+		Svc("myapp").Enable().User(),
+		Svc("myapp").Start().User().Retry(2),
 
 		// Conditional task
-		Svc("collector").Start().When(If("has_collector")),
+		Svc("worker").Start().When(If("has_worker")),
 
 		// Health check
 		WaitForPort("127.0.0.1", "4022").Timeout("30s"),
@@ -488,18 +488,18 @@ func TestManifest_DeploymentPattern(t *testing.T) {
 	}
 
 	// Verify conditional task
-	collectorTask := tasks[6]
-	if collectorTask.When == nil {
-		t.Error("expected collector task to have When condition")
+	workerTask := tasks[6]
+	if workerTask.When == nil {
+		t.Error("expected worker task to have When condition")
 	}
-	if !collectorTask.When(vars) {
-		t.Error("expected collector task condition to be true")
+	if !workerTask.When(vars) {
+		t.Error("expected worker task condition to be true")
 	}
 
-	// Test with collector disabled
-	vars.SetBool("has_collector", false)
-	if collectorTask.When(vars) {
-		t.Error("expected collector task condition to be false when disabled")
+	// Test with worker disabled
+	vars.SetBool("has_worker", false)
+	if workerTask.When(vars) {
+		t.Error("expected worker task condition to be false when disabled")
 	}
 }
 
@@ -547,22 +547,22 @@ func TestManifest_WibuApplyPattern(t *testing.T) {
 
 func TestTaskExpansion(t *testing.T) {
 	vars := NewVars()
-	vars.Set("service", "game")
-	vars.Set("port", "4022")
+	vars.Set("service", "myapp")
+	vars.Set("port", "8080")
 
 	// Simulate what executor does with variable expansion
 	task := Svc("{{service}}").Start().Build()
 	expandedDest := vars.Expand(task.Dest)
 
-	if expandedDest != "game" {
-		t.Errorf("expected 'game', got '%s'", expandedDest)
+	if expandedDest != "myapp" {
+		t.Errorf("expected 'myapp', got '%s'", expandedDest)
 	}
 }
 
 func TestLoopExpansion(t *testing.T) {
 	vars := NewVars()
 
-	task := Run("systemctl restart {{item}}").Loop("game", "trendboard", "collector").Build()
+	task := Run("systemctl restart {{item}}").Loop("myapp", "worker", "scheduler").Build()
 
 	// Simulate loop execution
 	for _, item := range task.Loop {
@@ -573,5 +573,265 @@ func TestLoopExpansion(t *testing.T) {
 		if expanded != expected {
 			t.Errorf("expected '%s', got '%s'", expected, expanded)
 		}
+	}
+}
+
+// =============================================================================
+// SYSTEMD SERVICE FILE MANAGEMENT TESTS
+// =============================================================================
+
+func TestEscapeSed(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"simple", "simple"},
+		{"192.168.1.1", "192.168.1.1"},
+		{"path/to/file", `path\/to\/file`},
+		{"a&b", `a\&b`},
+		{`back\slash`, `back\\slash`},
+		{`/path/with&special\chars`, `\/path\/with\&special\\chars`},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		result := EscapeSed(tt.input)
+		if result != tt.expected {
+			t.Errorf("EscapeSed(%q): expected %q, got %q", tt.input, tt.expected, result)
+		}
+	}
+}
+
+func TestUpdateServiceParam(t *testing.T) {
+	// Test that the pattern is correctly generated
+	pattern := UpdateServiceParam("port", "3099")
+	expected := `s%-port=\("\{0,1\}\)\([^" ]*\)\1%-port=\13099\1%g`
+	if pattern != expected {
+		t.Errorf("UpdateServiceParam pattern mismatch:\nexpected: %s\ngot:      %s", expected, pattern)
+	}
+
+	// Test with special characters in value
+	pattern = UpdateServiceParam("host", "192.168.1.1")
+	expected = `s%-host=\("\{0,1\}\)\([^" ]*\)\1%-host=\1192.168.1.1\1%g`
+	if pattern != expected {
+		t.Errorf("UpdateServiceParam with IP:\nexpected: %s\ngot:      %s", expected, pattern)
+	}
+
+	// Test with path containing slashes
+	pattern = UpdateServiceParam("config", "/etc/myapp/config.json")
+	expected = `s%-config=\("\{0,1\}\)\([^" ]*\)\1%-config=\1\/etc\/myapp\/config.json\1%g`
+	if pattern != expected {
+		t.Errorf("UpdateServiceParam with path:\nexpected: %s\ngot:      %s", expected, pattern)
+	}
+}
+
+func TestUpdateServiceParamTask(t *testing.T) {
+	task := UpdateServiceParamTask("/etc/systemd/system/myapp.service", "port", "8080").Build()
+
+	if task.Action != "sed" {
+		t.Errorf("expected action 'sed', got '%s'", task.Action)
+	}
+	if task.Dest != "/etc/systemd/system/myapp.service" {
+		t.Errorf("expected dest '/etc/systemd/system/myapp.service', got '%s'", task.Dest)
+	}
+	expectedPattern := `s%-port=\("\{0,1\}\)\([^" ]*\)\1%-port=\18080\1%g`
+	if task.Body != expectedPattern {
+		t.Errorf("expected pattern %q, got %q", expectedPattern, task.Body)
+	}
+}
+
+func TestServiceFileConfig_servicePath(t *testing.T) {
+	// Test user service path
+	userCfg := ServiceFileConfig{Name: "myapp", IsUser: true}
+	if userCfg.servicePath() != "~/.config/systemd/user/myapp.service" {
+		t.Errorf("unexpected user service path: %s", userCfg.servicePath())
+	}
+
+	// Test system service path
+	sysCfg := ServiceFileConfig{Name: "worker", IsUser: false}
+	if sysCfg.servicePath() != "/etc/systemd/system/worker.service" {
+		t.Errorf("unexpected system service path: %s", sysCfg.servicePath())
+	}
+}
+
+func TestManageServiceFile_UserService(t *testing.T) {
+	cfg := ServiceFileConfig{
+		Name:     "myapp",
+		Template: "[Unit]\nDescription=MyApp\n[Service]\nExecStart=/usr/bin/myapp -port=8080",
+		IsUser:   true,
+		Params: map[string]string{
+			"port": "8080",
+		},
+	}
+
+	tasks := ManageServiceFile(cfg)
+
+	// Should have: 1 check + 1 create + 1 param update = 3 tasks
+	if len(tasks) != 3 {
+		t.Errorf("expected 3 tasks, got %d", len(tasks))
+	}
+
+	// First task: file_exists check
+	if tasks[0].Action != "file_exists" {
+		t.Errorf("expected first task action 'file_exists', got '%s'", tasks[0].Action)
+	}
+	if tasks[0].Register != "myapp_service_exists" {
+		t.Errorf("expected register 'myapp_service_exists', got '%s'", tasks[0].Register)
+	}
+
+	// Second task: template creation (conditional)
+	if tasks[1].Action != "template" {
+		t.Errorf("expected second task action 'template', got '%s'", tasks[1].Action)
+	}
+	if !tasks[1].User {
+		t.Error("expected template task to have User=true for user service")
+	}
+	if tasks[1].When == nil {
+		t.Error("expected template task to have When condition")
+	}
+
+	// Third task: sed update (conditional)
+	if tasks[2].Action != "sed" {
+		t.Errorf("expected third task action 'sed', got '%s'", tasks[2].Action)
+	}
+	if tasks[2].When == nil {
+		t.Error("expected sed task to have When condition")
+	}
+}
+
+func TestManageServiceFile_SystemService(t *testing.T) {
+	cfg := ServiceFileConfig{
+		Name:     "worker",
+		Template: "[Unit]\nDescription=Worker\n[Service]\nExecStart=/usr/bin/worker",
+		IsUser:   false,
+		Params:   map[string]string{},
+	}
+
+	tasks := ManageServiceFile(cfg)
+
+	// Should have: 1 check + 1 create = 2 tasks (no params)
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks, got %d", len(tasks))
+	}
+
+	// Template task should use Sudo for system services
+	if !tasks[1].Sudo {
+		t.Error("expected template task to have Sudo=true for system service")
+	}
+}
+
+func TestManageServiceFileWithReload(t *testing.T) {
+	cfg := ServiceFileConfig{
+		Name:     "myapp",
+		Template: "[Unit]\nDescription=MyApp",
+		IsUser:   true,
+		Params:   map[string]string{},
+	}
+
+	tasks := ManageServiceFileWithReload(cfg)
+
+	// Should have: 1 check + 1 create + 1 daemon-reload + 1 restart = 4 tasks
+	if len(tasks) != 4 {
+		t.Errorf("expected 4 tasks, got %d", len(tasks))
+	}
+
+	// Third task: daemon_reload
+	if tasks[2].Action != "daemon_reload" {
+		t.Errorf("expected third task action 'daemon_reload', got '%s'", tasks[2].Action)
+	}
+	if !tasks[2].User {
+		t.Error("expected daemon_reload to have User=true for user service")
+	}
+
+	// Fourth task: service restart
+	if tasks[3].Action != "service" {
+		t.Errorf("expected fourth task action 'service', got '%s'", tasks[3].Action)
+	}
+	if tasks[3].State != "restart" {
+		t.Errorf("expected state 'restart', got '%s'", tasks[3].State)
+	}
+	if tasks[3].Dest != "myapp" {
+		t.Errorf("expected dest 'myapp', got '%s'", tasks[3].Dest)
+	}
+}
+
+func TestManageServiceFile_MultipleParams(t *testing.T) {
+	cfg := ServiceFileConfig{
+		Name:     "myapp",
+		Template: "[Service]\nExecStart=/usr/bin/myapp -port=8080 -host=127.0.0.1 -mode=default",
+		IsUser:   true,
+		Params: map[string]string{
+			"port": "9000",
+			"host": "192.168.1.100",
+			"mode": "production",
+		},
+	}
+
+	tasks := ManageServiceFile(cfg)
+
+	// Should have: 1 check + 1 create + 3 param updates = 5 tasks
+	if len(tasks) != 5 {
+		t.Errorf("expected 5 tasks, got %d", len(tasks))
+	}
+
+	// Count sed tasks
+	sedCount := 0
+	for _, task := range tasks {
+		if task.Action == "sed" {
+			sedCount++
+		}
+	}
+	if sedCount != 3 {
+		t.Errorf("expected 3 sed tasks, got %d", sedCount)
+	}
+}
+
+func TestManageServiceFile_NeedsSudo(t *testing.T) {
+	// User service without NeedsSudo - should NOT have sudo on sed tasks
+	cfg := ServiceFileConfig{
+		Name:      "myapp",
+		Template:  "[Service]\nExecStart=/usr/bin/myapp -port=8080",
+		IsUser:    true,
+		NeedsSudo: false,
+		Params:    map[string]string{"port": "9000"},
+	}
+
+	tasks := ManageServiceFile(cfg)
+
+	// Template task should have User=true but Sudo=false
+	if !tasks[1].User {
+		t.Error("expected template task to have User=true")
+	}
+	if tasks[1].Sudo {
+		t.Error("expected template task to have Sudo=false when NeedsSudo=false")
+	}
+
+	// Sed task should NOT have sudo
+	if tasks[2].Sudo {
+		t.Error("expected sed task to have Sudo=false when NeedsSudo=false")
+	}
+
+	// User service WITH NeedsSudo - should have sudo on all file operations
+	cfgWithSudo := ServiceFileConfig{
+		Name:      "myapp",
+		Template:  "[Service]\nExecStart=/usr/bin/myapp -port=8080",
+		IsUser:    true,
+		NeedsSudo: true,
+		Params:    map[string]string{"port": "9000"},
+	}
+
+	tasksWithSudo := ManageServiceFile(cfgWithSudo)
+
+	// Template task should have both User=true AND Sudo=true
+	if !tasksWithSudo[1].User {
+		t.Error("expected template task to have User=true")
+	}
+	if !tasksWithSudo[1].Sudo {
+		t.Error("expected template task to have Sudo=true when NeedsSudo=true")
+	}
+
+	// Sed task should have sudo
+	if !tasksWithSudo[2].Sudo {
+		t.Error("expected sed task to have Sudo=true when NeedsSudo=true")
 	}
 }
