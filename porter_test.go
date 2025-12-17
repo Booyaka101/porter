@@ -933,3 +933,44 @@ func TestManageServiceFileWithReload_When(t *testing.T) {
 		t.Error("restart task should fail when env=staging")
 	}
 }
+
+func TestManageServiceFiles(t *testing.T) {
+	configs := []ServiceFileConfig{
+		{
+			Name:     "app1",
+			Template: "[Service]\nExecStart=/usr/bin/app1",
+			IsUser:   true,
+			Params:   map[string]string{},
+		},
+		{
+			Name:     "app2",
+			Template: "[Service]\nExecStart=/usr/bin/app2 -port=8080",
+			IsUser:   false,
+			Params:   map[string]string{"port": "9000"},
+		},
+	}
+
+	tasks := ManageServiceFiles(configs)
+
+	// app1: 1 check + 1 create = 2 tasks (no params)
+	// app2: 1 check + 1 create + 1 param update = 3 tasks
+	// Total: 5 tasks
+	if len(tasks) != 5 {
+		t.Errorf("expected 5 tasks, got %d", len(tasks))
+	}
+
+	// Verify first config's tasks (app1)
+	if tasks[0].Register != "app1_service_exists" {
+		t.Errorf("expected first task register 'app1_service_exists', got '%s'", tasks[0].Register)
+	}
+
+	// Verify second config's tasks start at index 2 (app2)
+	if tasks[2].Register != "app2_service_exists" {
+		t.Errorf("expected third task register 'app2_service_exists', got '%s'", tasks[2].Register)
+	}
+
+	// Verify app2's sed task exists
+	if tasks[4].Action != "sed" {
+		t.Errorf("expected fifth task action 'sed', got '%s'", tasks[4].Action)
+	}
+}
