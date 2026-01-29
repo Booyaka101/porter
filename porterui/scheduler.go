@@ -169,6 +169,10 @@ func loadScheduledJobsFromDB() ([]*ScheduledJob, error) {
 }
 
 func (s *Scheduler) save() error {
+	if db != nil {
+		return nil // Database saves are done individually
+	}
+
 	var jobs []*ScheduledJob
 	for _, job := range s.jobs {
 		jobs = append(jobs, job)
@@ -179,6 +183,50 @@ func (s *Scheduler) save() error {
 		return err
 	}
 	return os.WriteFile(s.filePath, data, 0644)
+}
+
+// saveScheduledJobToDB saves a scheduled job to the database
+func saveScheduledJobToDB(job *ScheduledJob) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	machineIDsJSON, _ := json.Marshal(job.MachineIDs)
+	enabledInt := 0
+	if job.Enabled {
+		enabledInt = 1
+	}
+	notifyFailInt := 0
+	if job.NotifyOnFail {
+		notifyFailInt = 1
+	}
+	notifySuccessInt := 0
+	if job.NotifyOnSuccess {
+		notifySuccessInt = 1
+	}
+
+	_, err := db.db.Exec(`
+		INSERT OR REPLACE INTO scheduled_jobs 
+		(id, name, description, script_path, args, machine_ids, cron_expr, enabled,
+		 last_run, next_run, last_status, last_error, run_count, success_count, fail_count,
+		 timeout_mins, retry_count, retry_delay_min, notify_on_fail, notify_on_success, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		job.ID, job.Name, job.Description, job.ScriptPath, job.Args, string(machineIDsJSON),
+		job.CronExpr, enabledInt, job.LastRun.Format(time.RFC3339), job.NextRun.Format(time.RFC3339),
+		job.LastStatus, job.LastError, job.RunCount, job.SuccessCount, job.FailCount,
+		job.TimeoutMins, job.RetryCount, job.RetryDelayMin, notifyFailInt, notifySuccessInt,
+		time.Now().Format(time.RFC3339))
+
+	return err
+}
+
+// deleteScheduledJobFromDB deletes a scheduled job from the database
+func deleteScheduledJobFromDB(id string) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := db.db.Exec("DELETE FROM scheduled_jobs WHERE id = ?", id)
+	return err
 }
 
 func (s *Scheduler) scheduleJob(job *ScheduledJob) error {
@@ -434,6 +482,9 @@ func (s *Scheduler) AddJob(job *ScheduledJob) error {
 		}
 	}
 
+	if db != nil {
+		return saveScheduledJobToDB(job)
+	}
 	return s.save()
 }
 
@@ -452,6 +503,9 @@ func (s *Scheduler) UpdateJob(job *ScheduledJob) error {
 		return err
 	}
 
+	if db != nil {
+		return saveScheduledJobToDB(job)
+	}
 	return s.save()
 }
 
@@ -466,6 +520,10 @@ func (s *Scheduler) DeleteJob(jobID string) error {
 	}
 
 	delete(s.jobs, jobID)
+
+	if db != nil {
+		return deleteScheduledJobFromDB(jobID)
+	}
 	return s.save()
 }
 

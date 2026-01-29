@@ -290,6 +290,9 @@ func (r *MachineRepo) load() {
 }
 
 func (r *MachineRepo) save() {
+	if db != nil {
+		return // Database saves are done individually
+	}
 	r.mu.RLock()
 	machineList := make([]*Machine, 0, len(r.machines))
 	for _, m := range r.machines {
@@ -297,6 +300,38 @@ func (r *MachineRepo) save() {
 	}
 	r.mu.RUnlock()
 	r.store.Save("machines.json", machineList)
+}
+
+// saveMachineToDB saves a machine to the database
+func saveMachineToDB(m *Machine) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	tagsJSON, _ := json.Marshal(m.Tags)
+	hasAgentInt := 0
+	if m.HasAgent {
+		hasAgentInt = 1
+	}
+
+	_, err := db.db.Exec(`
+		INSERT OR REPLACE INTO machines 
+		(id, name, ip, username, password, status, category, notes, agent_port, has_agent, tags, mac, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.Name, m.IP, m.Username, m.Password, m.Status, m.Category, m.Notes,
+		m.AgentPort, hasAgentInt, string(tagsJSON), m.MAC,
+		time.Now().Format(time.RFC3339), time.Now().Format(time.RFC3339))
+
+	return err
+}
+
+// deleteMachineFromDB deletes a machine from the database
+func deleteMachineFromDB(id string) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := db.db.Exec("DELETE FROM machines WHERE id = ?", id)
+	return err
 }
 
 func (r *MachineRepo) List() []*Machine {
@@ -320,14 +355,22 @@ func (r *MachineRepo) Add(m *Machine) {
 	r.mu.Lock()
 	r.machines[m.ID] = m
 	r.mu.Unlock()
-	go r.save()
+	if db != nil {
+		saveMachineToDB(m)
+	} else {
+		go r.save()
+	}
 }
 
 func (r *MachineRepo) Delete(id string) {
 	r.mu.Lock()
 	delete(r.machines, id)
 	r.mu.Unlock()
-	go r.save()
+	if db != nil {
+		deleteMachineFromDB(id)
+	} else {
+		go r.save()
+	}
 }
 
 func (r *MachineRepo) UpdateStatus(id, status string) {
@@ -341,6 +384,7 @@ func (r *MachineRepo) UpdateStatus(id, status string) {
 func (r *MachineRepo) Update(updated *Machine) bool {
 	r.mu.Lock()
 	found := false
+	var machineToSave *Machine
 	if m, ok := r.machines[updated.ID]; ok {
 		m.Name = updated.Name
 		m.IP = updated.IP
@@ -353,25 +397,38 @@ func (r *MachineRepo) Update(updated *Machine) bool {
 		m.AgentPort = updated.AgentPort
 		m.HasAgent = updated.HasAgent
 		m.Tags = updated.Tags
+		machineToSave = m
 		found = true
 	}
 	r.mu.Unlock()
 	if found {
-		go r.save()
+		if db != nil {
+			saveMachineToDB(machineToSave)
+		} else {
+			go r.save()
+		}
 	}
 	return found
 }
 
 func (r *MachineRepo) UpdateAgentStatus(id string, hasAgent bool, port int) {
 	r.mu.Lock()
+	var machineToSave *Machine
 	if m, ok := r.machines[id]; ok {
 		m.HasAgent = hasAgent
 		if port > 0 {
 			m.AgentPort = port
 		}
+		machineToSave = m
 	}
 	r.mu.Unlock()
-	go r.save()
+	if machineToSave != nil {
+		if db != nil {
+			saveMachineToDB(machineToSave)
+		} else {
+			go r.save()
+		}
+	}
 }
 
 // ============================================================================

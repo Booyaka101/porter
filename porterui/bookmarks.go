@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -113,11 +114,42 @@ func loadBookmarksFromDB() ([]Bookmark, error) {
 }
 
 func (b *BookmarkStore) save() error {
+	if db != nil {
+		return nil // Database saves are done individually
+	}
 	data, err := json.MarshalIndent(b.bookmarks, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(b.filePath, data, 0644)
+}
+
+// saveBookmarkToDB saves a bookmark to the database
+func saveBookmarkToDB(bookmark Bookmark) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	machineIDsJSON, _ := json.Marshal(bookmark.MachineIDs)
+
+	_, err := db.db.Exec(`
+		INSERT OR REPLACE INTO bookmarks 
+		(id, name, type, script_path, command, args, machine_ids, description, color, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		bookmark.ID, bookmark.Name, bookmark.Type, bookmark.ScriptPath, bookmark.Command,
+		bookmark.Args, string(machineIDsJSON), bookmark.Description, bookmark.Color,
+		time.Now().Format(time.RFC3339))
+
+	return err
+}
+
+// deleteBookmarkFromDB deletes a bookmark from the database
+func deleteBookmarkFromDB(id string) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := db.db.Exec("DELETE FROM bookmarks WHERE id = ?", id)
+	return err
 }
 
 // Add adds a new bookmark
@@ -126,6 +158,10 @@ func (b *BookmarkStore) Add(bookmark Bookmark) error {
 	defer b.mu.Unlock()
 
 	b.bookmarks = append(b.bookmarks, bookmark)
+
+	if db != nil {
+		return saveBookmarkToDB(bookmark)
+	}
 	return b.save()
 }
 
@@ -137,6 +173,9 @@ func (b *BookmarkStore) Remove(id string) error {
 	for i, bm := range b.bookmarks {
 		if bm.ID == id {
 			b.bookmarks = append(b.bookmarks[:i], b.bookmarks[i+1:]...)
+			if db != nil {
+				return deleteBookmarkFromDB(id)
+			}
 			return b.save()
 		}
 	}

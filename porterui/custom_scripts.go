@@ -217,6 +217,10 @@ func loadCustomScriptsFromDB() ([]*CustomScript, error) {
 }
 
 func (s *CustomScriptStore) saveIndex() error {
+	if db != nil {
+		return nil // Database saves are done individually
+	}
+
 	scripts := make([]*CustomScript, 0, len(s.scripts))
 	for _, script := range s.scripts {
 		scripts = append(scripts, script)
@@ -236,6 +240,33 @@ func (s *CustomScriptStore) saveIndex() error {
 		return fmt.Errorf("failed to write index: %w", err)
 	}
 	return nil
+}
+
+// saveCustomScriptToDB saves a custom script to the database
+func saveCustomScriptToDB(script *CustomScript, content string) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	tagsJSON, _ := json.Marshal(script.Tags)
+
+	_, err := db.db.Exec(`
+		INSERT OR REPLACE INTO custom_scripts 
+		(id, name, description, category, file_name, content, size, tags, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		script.ID, script.Name, script.Description, script.Category, script.FileName,
+		content, script.Size, string(tagsJSON), script.CreatedAt.Format(time.RFC3339))
+
+	return err
+}
+
+// deleteCustomScriptFromDB deletes a custom script from the database
+func deleteCustomScriptFromDB(id string) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := db.db.Exec("DELETE FROM custom_scripts WHERE id = ?", id)
+	return err
 }
 
 func (s *CustomScriptStore) scriptPath(id string) string {
@@ -274,7 +305,15 @@ func (s *CustomScriptStore) Add(input *ScriptInput) (*CustomScript, error) {
 	}
 
 	s.scripts[script.ID] = script
-	if err := s.saveIndex(); err != nil {
+
+	// Save to database if available
+	if db != nil {
+		if err := saveCustomScriptToDB(script, input.Content); err != nil {
+			os.Remove(s.scriptPath(script.ID))
+			delete(s.scripts, script.ID)
+			return nil, err
+		}
+	} else if err := s.saveIndex(); err != nil {
 		// Rollback file creation
 		os.Remove(s.scriptPath(script.ID))
 		delete(s.scripts, script.ID)
@@ -308,14 +347,21 @@ func (s *CustomScriptStore) Update(id string, input *ScriptInput) (*CustomScript
 	}
 	existing.UpdatedAt = time.Now()
 
+	contentToSave := ""
 	if input.Content != "" {
 		existing.Size = int64(len(input.Content))
+		contentToSave = input.Content
 		if err := os.WriteFile(s.scriptPath(id), []byte(input.Content), 0755); err != nil {
 			return nil, fmt.Errorf("failed to write script file: %w", err)
 		}
 	}
 
-	if err := s.saveIndex(); err != nil {
+	// Save to database if available
+	if db != nil {
+		if err := saveCustomScriptToDB(existing, contentToSave); err != nil {
+			return nil, err
+		}
+	} else if err := s.saveIndex(); err != nil {
 		return nil, err
 	}
 
@@ -335,6 +381,11 @@ func (s *CustomScriptStore) Delete(id string) error {
 	os.Remove(s.scriptPath(id))
 
 	delete(s.scripts, id)
+
+	// Delete from database if available
+	if db != nil {
+		return deleteCustomScriptFromDB(id)
+	}
 	return s.saveIndex()
 }
 

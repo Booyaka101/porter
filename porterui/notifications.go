@@ -141,11 +141,47 @@ func loadNotificationConfigFromDB() (NotificationConfig, error) {
 }
 
 func (n *NotificationStore) saveConfig() error {
+	if db != nil {
+		return saveNotificationConfigToDB(n.config)
+	}
 	data, err := json.MarshalIndent(n.config, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(n.configPath, data, 0644)
+}
+
+// saveNotificationConfigToDB saves notification config to database
+func saveNotificationConfigToDB(config NotificationConfig) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	enabledInt := 0
+	if config.Enabled {
+		enabledInt = 1
+	}
+	onSuccessInt := 0
+	if config.OnSuccess {
+		onSuccessInt = 1
+	}
+	onFailureInt := 0
+	if config.OnFailure {
+		onFailureInt = 1
+	}
+	onScheduledInt := 0
+	if config.OnScheduled {
+		onScheduledInt = 1
+	}
+
+	_, err := db.db.Exec(`
+		INSERT OR REPLACE INTO notification_config 
+		(id, enabled, slack_webhook, email_smtp, email_from, email_to, email_password, on_success, on_failure, on_scheduled)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		enabledInt, config.SlackWebhook, config.EmailSMTP, config.EmailFrom,
+		config.EmailTo, config.EmailPassword, onSuccessInt, onFailureInt, onScheduledInt)
+
+	return err
 }
 
 // Add adds a new notification

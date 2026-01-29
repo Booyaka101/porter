@@ -164,11 +164,43 @@ func loadHistoryFromDB() ([]ExecutionRecord, error) {
 }
 
 func (h *HistoryStore) save() error {
+	// If using database, we don't need to save to file
+	// Records are saved individually via saveHistoryRecordToDB
+	if db != nil {
+		return nil
+	}
+
+	// Fallback to JSON file
 	data, err := json.MarshalIndent(h.records, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(h.filePath, data, 0644)
+}
+
+// saveHistoryRecordToDB saves a single execution record to the database
+func saveHistoryRecordToDB(record ExecutionRecord) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	successInt := 0
+	if record.Success {
+		successInt = 1
+	}
+
+	_, err := db.db.Exec(`
+		INSERT OR REPLACE INTO execution_history 
+		(id, machine_id, machine_name, machine_ip, script_path, script_name, args, preset_name,
+		 started_at, finished_at, duration, success, output, error, exit_code, operator, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ID, record.MachineID, record.MachineName, record.MachineIP,
+		record.ScriptPath, record.ScriptName, record.Args, record.PresetName,
+		record.StartedAt.Format(time.RFC3339), record.FinishedAt.Format(time.RFC3339),
+		record.Duration, successInt, record.Output, record.Error, record.ExitCode,
+		record.Operator, time.Now().Format(time.RFC3339))
+
+	return err
 }
 
 // Add adds a new execution record
@@ -193,7 +225,12 @@ func (h *HistoryStore) Add(record ExecutionRecord) {
 		h.records = h.records[:h.maxSize]
 	}
 
-	h.save()
+	// Save to database if available
+	if db != nil {
+		saveHistoryRecordToDB(record)
+	} else {
+		h.save()
+	}
 }
 
 // GetAll returns all execution records
