@@ -44,10 +44,17 @@ func InitSQLiteDatabase(dbPath string) error {
 	db = &Database{db: conn}
 	dbType = "sqlite"
 
-	// Run migrations
-	log.Println("Running SQLite database migrations...")
-	if err := db.migrateSQLite(); err != nil {
-		log.Printf("Migration warning: %v (continuing anyway)", err)
+	// Check if tables already exist - skip migrations if they do
+	var tableCount int
+	err = conn.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'").Scan(&tableCount)
+	if err == nil && tableCount > 0 {
+		log.Println("SQLite database tables already exist, skipping migrations")
+	} else {
+		// Run migrations only if tables don't exist
+		log.Println("Running SQLite database migrations...")
+		if err := db.migrateSQLite(); err != nil {
+			log.Printf("Migration warning: %v (continuing anyway)", err)
+		}
 	}
 
 	log.Println("SQLite database initialized successfully")

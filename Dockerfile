@@ -60,8 +60,8 @@ USER porter
 EXPOSE 8069
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -q --spider http://localhost:8069/ || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:8069/ || exit 1
 
 # Environment variables
 ENV PORT=8069
