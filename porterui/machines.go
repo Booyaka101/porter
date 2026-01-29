@@ -188,10 +188,63 @@ type ScriptExecution struct {
 
 // LoadMachines loads all machines from storage (helper for other packages)
 func LoadMachines() ([]Machine, error) {
+	// If using database, load from there
+	if db != nil {
+		return LoadMachinesFromDB()
+	}
+
+	// Fallback to JSON file storage
 	var machines []Machine
 	if err := GetStore().Load("machines.json", &machines); err != nil {
+		// Return empty list if file doesn't exist
+		if os.IsNotExist(err) {
+			return []Machine{}, nil
+		}
 		return nil, err
 	}
+	return machines, nil
+}
+
+// LoadMachinesFromDB loads all machines from the database
+func LoadMachinesFromDB() ([]Machine, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := db.db.Query(`
+		SELECT id, name, ip, username, COALESCE(password, ''), status, 
+		       COALESCE(category, ''), COALESCE(notes, ''), agent_port, has_agent,
+		       COALESCE(tags, '[]'), COALESCE(mac, '')
+		FROM machines`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var machines []Machine
+	for rows.Next() {
+		var m Machine
+		var tagsJSON string
+		var password, category, notes, mac string
+
+		if err := rows.Scan(&m.ID, &m.Name, &m.IP, &m.Username, &password,
+			&m.Status, &category, &notes, &m.AgentPort, &m.HasAgent, &tagsJSON, &mac); err != nil {
+			continue
+		}
+
+		m.Password = password
+		m.Category = category
+		m.Notes = notes
+		m.MAC = mac
+
+		// Parse tags JSON
+		if tagsJSON != "" && tagsJSON != "[]" {
+			json.Unmarshal([]byte(tagsJSON), &m.Tags)
+		}
+
+		machines = append(machines, m)
+	}
+
 	return machines, nil
 }
 
