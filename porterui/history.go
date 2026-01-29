@@ -67,6 +67,16 @@ func SetPortableMode(enabled bool) {
 }
 
 func getDataDir() string {
+	// Check for DATA_DIR environment variable first
+	if dataDir := os.Getenv("DATA_DIR"); dataDir != "" {
+		return dataDir
+	}
+
+	// Check if /app/data exists (Docker container)
+	if _, err := os.Stat("/app/data"); err == nil {
+		return "/app/data"
+	}
+
 	if portableMode {
 		// Portable mode: store data alongside the executable
 		execPath, err := os.Executable()
