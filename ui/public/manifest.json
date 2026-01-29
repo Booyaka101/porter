@@ -1,0 +1,15 @@
+{
+  "short_name": "Porter",
+  "name": "Porter - Script Runner",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#f97316",
+  "background_color": "#0f0f0f"
+}

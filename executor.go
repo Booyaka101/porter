@@ -372,11 +372,50 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 
 	// Git
 	case "git_clone":
-		return e.run("git clone " + src + " " + dest)
+		cmd := "git clone"
+		if strings.Contains(body, "shallow:true") {
+			cmd += " --depth 1"
+		} else if depth := e.parseOpt(body, "depth"); depth != "" {
+			cmd += " --depth " + depth
+		}
+		cmd += " " + src + " " + dest
+		return e.run(cmd)
 	case "git_pull":
-		return e.run("cd " + dest + " && git pull")
+		return e.run("cd " + dest + " && git pull --ff-only")
 	case "git_checkout":
 		return e.run("cd " + dest + " && git checkout " + body)
+	case "git_lfs_pull":
+		return e.run("cd " + dest + " && git lfs pull")
+	case "git_fetch":
+		cmd := "cd " + dest + " && git fetch origin"
+		if strings.Contains(body, "prune:true") {
+			cmd += " --prune"
+		}
+		return e.run(cmd)
+	case "git_reset":
+		cmd := "cd " + dest + " && git reset"
+		if strings.Contains(body, "hard:true") || body == "HEAD" || body == "" {
+			cmd += " --hard"
+		}
+		if body != "" && !strings.Contains(body, ":") {
+			cmd += " " + body
+		}
+		return e.run(cmd)
+	case "git_clean":
+		cmd := "cd " + dest + " && git clean -f -d"
+		if strings.Contains(body, "force:true") {
+			cmd += " -x"
+		}
+		return e.run(cmd)
+	case "git_describe":
+		out, err := e.runCapture("cd " + dest + " && git describe --tags --always 2>/dev/null || git rev-parse --short HEAD")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
 
 	// Cron
 	case "cron_add":
@@ -407,6 +446,32 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 	// Systemd
 	case "service":
 		return e.serviceCtl(dest, t.State, t.User)
+	case "service_list":
+		userFlag := ""
+		if t.User {
+			userFlag = "--user "
+		}
+		out, err := e.runCapture("systemctl " + userFlag + "list-units --type=service --all --no-pager --plain --no-legend")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "timer_list":
+		userFlag := ""
+		if t.User {
+			userFlag = "--user "
+		}
+		out, err := e.runCapture("systemctl " + userFlag + "list-units --type=timer --all --no-pager --plain --no-legend")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
 	case "daemon_reload":
 		if t.User {
 			return e.run("systemctl --user daemon-reload")
@@ -438,6 +503,57 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 		return e.runSudo("docker rmi " + dest)
 	case "docker_prune":
 		return e.runSudo("docker system prune -af")
+
+	// Docker list/info
+	case "docker_ps":
+		all := ""
+		if strings.Contains(body, "all:true") {
+			all = "-a "
+		}
+		out, err := e.runCapture("sudo docker ps " + all + "--format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.CreatedAt}}|{{.State}}'")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "docker_images":
+		out, err := e.runCapture("sudo docker images --format '{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}'")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "docker_volumes":
+		out, err := e.runCapture("sudo docker volume ls --format '{{.Name}}|{{.Driver}}|{{.Mountpoint}}'")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "docker_networks":
+		out, err := e.runCapture("sudo docker network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}'")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "docker_info":
+		out, err := e.runCapture("sudo docker info --format '{{.Containers}}|{{.ContainersRunning}}|{{.Images}}'")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
 
 	// Docker containers
 	case "docker":
@@ -620,6 +736,104 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 		}
 		return e.sftpWrite(dest, data)
 
+	// Go build operations
+	case "go":
+		return e.goCtl(dest, t.State, t.Src, body)
+
+	// npm operations
+	case "npm":
+		return e.npmCtl(dest, t.State, body)
+
+	// System info operations
+	case "disk_space":
+		out, err := e.runCapture("df -BG " + dest + " | awk 'NR==2 {print $4}' | tr -d 'G'")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "memory_info":
+		out, err := e.runCapture("awk '/MemAvailable/ {print int($2/1024/1024)}' /proc/meminfo")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "cpu_info":
+		out, err := e.runCapture("nproc")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "load_avg":
+		out, err := e.runCapture("cat /proc/loadavg | cut -d' ' -f1-3")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "nproc":
+		out, err := e.runCapture("nproc")
+		if err != nil {
+			return err
+		}
+		if t.Register != "" {
+			vars.Set(t.Register, out)
+		}
+		return nil
+	case "command_exists":
+		_, err := e.runCapture("command -v " + dest)
+		if t.Register != "" {
+			if err == nil {
+				vars.Set(t.Register, "true")
+			} else {
+				vars.Set(t.Register, "false")
+			}
+		}
+		return nil
+	case "require_disk":
+		out, err := e.runCapture("df -BG " + dest + " | awk 'NR==2 {print $4}' | tr -d 'G'")
+		if err != nil {
+			return err
+		}
+		// Parse and compare
+		var avail int
+		fmt.Sscanf(out, "%d", &avail)
+		var required int
+		fmt.Sscanf(body, "%d", &required)
+		if avail < required {
+			return fmt.Errorf("insufficient disk space: %dGB available, %dGB required", avail, required)
+		}
+		return nil
+	case "require_memory":
+		out, err := e.runCapture("awk '/MemAvailable/ {print int($2/1024/1024)}' /proc/meminfo")
+		if err != nil {
+			return err
+		}
+		var avail int
+		fmt.Sscanf(out, "%d", &avail)
+		var required int
+		fmt.Sscanf(body, "%d", &required)
+		if avail < required {
+			return fmt.Errorf("insufficient memory: %dGB available, %dGB required", avail, required)
+		}
+		return nil
+	case "require_command":
+		_, err := e.runCapture("command -v " + dest)
+		if err != nil {
+			return fmt.Errorf("required command not found: %s", dest)
+		}
+		return nil
+
 	default:
 		return fmt.Errorf("unknown action: %s", t.Action)
 	}
@@ -632,10 +846,18 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 func (e *Executor) serviceCtl(name, state string, user bool) error {
 	svc := name + ".service"
 	if user {
+		// For status, we need to allow non-zero exit (inactive services return 3)
+		if state == "status" {
+			return e.run("systemctl --user " + state + " " + svc + " 2>&1 || true")
+		}
 		return e.run("systemctl --user " + state + " " + svc)
 	}
 	if state == "stop" {
 		return e.runSudo("service " + name + " stop")
+	}
+	// For status, we need to allow non-zero exit (inactive services return 3)
+	if state == "status" {
+		return e.runSudo("systemctl " + state + " " + svc + " 2>&1 || true")
 	}
 	return e.runSudo("systemctl " + state + " " + svc)
 }
@@ -947,6 +1169,176 @@ func (e *Executor) sftpWrite(path string, data []byte) error {
 		return fmt.Errorf("write remote file failed: %w", err)
 	}
 	return nil
+}
+
+// =============================================================================
+// GO BUILD HELPERS
+// =============================================================================
+
+func (e *Executor) goCtl(path, state, output, opts string) error {
+	// Parse options
+	goos := ""
+	goarch := ""
+	ldflags := ""
+	tags := ""
+	race := false
+	verbose := false
+	parallel := ""
+	failfast := false
+
+	for _, opt := range strings.Split(opts, ";") {
+		if opt == "" {
+			continue
+		}
+		parts := strings.SplitN(opt, ":", 2)
+		key := parts[0]
+		val := ""
+		if len(parts) == 2 {
+			val = parts[1]
+		}
+		switch key {
+		case "goos":
+			goos = val
+		case "goarch":
+			goarch = val
+		case "ldflags":
+			ldflags = val
+		case "tags":
+			tags = val
+		case "race":
+			race = val == "true" || val == ""
+		case "verbose":
+			verbose = val == "true" || val == ""
+		case "parallel":
+			parallel = val
+		case "failfast":
+			failfast = val == "true" || val == ""
+		}
+	}
+
+	// Build environment prefix
+	envPrefix := ""
+	if goos != "" {
+		envPrefix += "GOOS=" + goos + " "
+	}
+	if goarch != "" {
+		envPrefix += "GOARCH=" + goarch + " "
+	}
+
+	// Build command based on state
+	var cmd string
+	switch state {
+	case "build":
+		cmd = envPrefix + "go build"
+		if ldflags != "" {
+			cmd += " -ldflags=\"" + ldflags + "\""
+		}
+		if tags != "" {
+			cmd += " -tags=" + tags
+		}
+		if race {
+			cmd += " -race"
+		}
+		if output != "" {
+			cmd += " -o " + output
+		}
+		cmd += " ."
+	case "test":
+		cmd = "go test"
+		if verbose {
+			cmd += " -v"
+		}
+		if race {
+			cmd += " -race"
+		}
+		if failfast {
+			cmd += " -failfast"
+		}
+		if parallel != "" {
+			cmd += " -parallel " + parallel
+		}
+		if tags != "" {
+			cmd += " -tags=" + tags
+		}
+		cmd += " ./..."
+	case "mod_download":
+		cmd = "go mod download"
+	case "vet":
+		cmd = "go vet ./..."
+	default:
+		return fmt.Errorf("unknown go state: %s", state)
+	}
+
+	return e.run("cd " + path + " && " + cmd)
+}
+
+// =============================================================================
+// NPM HELPERS
+// =============================================================================
+
+func (e *Executor) npmCtl(path, state, opts string) error {
+	// Parse options
+	silent := false
+	production := false
+	legacyPeerDeps := false
+	script := ""
+
+	for _, opt := range strings.Split(opts, ";") {
+		if opt == "" {
+			continue
+		}
+		parts := strings.SplitN(opt, ":", 2)
+		key := parts[0]
+		val := ""
+		if len(parts) == 2 {
+			val = parts[1]
+		}
+		switch key {
+		case "silent":
+			silent = val == "true" || val == ""
+		case "production":
+			production = val == "true" || val == ""
+		case "legacy-peer-deps":
+			legacyPeerDeps = val == "true" || val == ""
+		case "script":
+			script = val
+		}
+	}
+
+	// Build command based on state
+	var cmd string
+	switch state {
+	case "install":
+		cmd = "npm install"
+		if production {
+			cmd += " --production"
+		}
+		if legacyPeerDeps {
+			cmd += " --legacy-peer-deps"
+		}
+	case "ci":
+		cmd = "npm ci"
+		if production {
+			cmd += " --production"
+		}
+	case "build":
+		cmd = "npm run build"
+	case "test":
+		cmd = "npm test"
+	case "run":
+		if script == "" {
+			return fmt.Errorf("npm run requires a script name")
+		}
+		cmd = "npm run " + script
+	default:
+		return fmt.Errorf("unknown npm state: %s", state)
+	}
+
+	if silent {
+		cmd += " --silent"
+	}
+
+	return e.run("cd " + path + " && " + cmd)
 }
 
 // =============================================================================

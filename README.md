@@ -237,8 +237,10 @@ porter.WaitForFile("/var/run/app.pid").Timeout("10s")
 ```go
 porter.If("enabled")               // True if var is "true"
 porter.IfNot("disabled")           // True if var is not "true"
-porter.IfSet("version")            // True if var is set
+porter.IfSet("version")            // True if var is set (non-empty)
+porter.IfNotSet("version")         // True if var is not set (empty)
 porter.IfEquals("env", "prod")     // True if var equals value
+porter.IfNotEquals("env", "dev")   // True if var does not equal value
 porter.And(cond1, cond2)           // All conditions true
 porter.Or(cond1, cond2)            // Any condition true
 porter.Not(cond)                   // Negate condition
@@ -368,6 +370,163 @@ See the [examples](./examples) directory for complete working examples:
 - **[conditional](./examples/conditional)** - Conditions, loops, and variable expansion
 - **[rsync](./examples/rsync)** - File synchronization with rsync
 - **[systemd](./examples/systemd)** - Systemd service file management
+
+## Porter UI (Web Interface)
+
+Porter includes a full-featured web interface for managing remote servers. The UI provides:
+
+- **Dashboard** - Overview of all machines with health status
+- **Interactive Terminal** - SSH terminal in the browser
+- **File Manager** - Browse, edit, upload, and download files
+- **Service Manager** - Control systemd services
+- **Docker Manager** - Manage containers, images, and compose stacks
+- **Live Logs** - Real-time log streaming with filtering
+- **System Monitor** - CPU, memory, disk, and network graphs
+- **Remote Desktop** - VNC access via noVNC
+- **Script Runner** - Execute deployment scripts with progress tracking
+- **Network Tools** - Ping, traceroute, DNS lookup, port scan
+
+### Building and Running
+
+```bash
+# Build everything (UI + Go binary)
+make build
+
+# Run the server
+./porter
+
+# Or in development mode
+make dev
+```
+
+See [ui/README.md](./ui/README.md) for frontend development and [porterui/README.md](./porterui/README.md) for backend API documentation.
+
+### Docker Deployment
+
+Run Porter as a complete packaged application using Docker:
+
+```bash
+# Single container with SQLite (default, includes auth)
+docker compose up -d
+
+# With MySQL instead of SQLite
+docker compose --profile mysql up -d
+```
+
+Access the UI at http://localhost:8069
+
+**Default login:** `admin` / `admin` (change after first login!)
+
+#### Docker Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8069` | Server port |
+| `USE_SQLITE` | `true` | Use SQLite database (default, embedded) |
+| `USE_MYSQL` | `false` | Use MySQL instead of SQLite |
+| `SQLITE_PATH` | `data/porter.db` | SQLite database file path |
+| `DB_HOST` | `localhost` | MySQL host (when USE_MYSQL=true) |
+| `DB_PORT` | `3306` | MySQL port |
+| `DB_USER` | `porter` | MySQL username |
+| `DB_PASSWORD` | - | MySQL password |
+| `DB_NAME` | `porter` | MySQL database name |
+
+#### Migrating from MySQL to SQLite
+
+If you have an existing Porter installation using MySQL and want to switch to SQLite:
+
+```bash
+# Run migration (connects to MySQL, exports to SQLite)
+docker run --rm \
+  -e MIGRATE_FROM_MYSQL=true \
+  -e DB_HOST=your-mysql-host \
+  -e DB_USER=porter \
+  -e DB_PASSWORD=your-password \
+  -e DB_NAME=porter \
+  -v porter-data:/app/data \
+  porter:latest
+
+# Then start Porter with SQLite
+docker compose up -d
+```
+
+Or using the binary directly:
+```bash
+./porter -migrate-mysql \
+  -portable
+```
+
+This will migrate all users, machines, scheduled jobs, history, and settings from MySQL to SQLite.
+
+## Engineering Review (Principal / Harsh)
+
+This section is intentionally blunt. It’s meant to highlight what would block adoption in production environments and what would come up in a senior/principal review.
+
+### Grades
+
+- **Service / production-readiness grade: C**
+  - Main reasons:
+    - Security posture is currently weak (host key verification disabled; heavy string-concatenated shell execution).
+    - Correctness semantics are muddy (e.g., "changed" is reported for every successful task).
+
+- **Codebase / maintainability grade: B-**
+  - Main reasons:
+    - The DSL has good ergonomics and the file split is a meaningful improvement.
+    - The executor is still a large, stringly-typed action switch with duplicated logic and inconsistent behavior.
+
+### What’s strong
+
+- **DSL ergonomics**: `porter.Tasks( ... )` plus fluent modifiers is easy to use.
+- **Project structure**: Splitting the former monolithic DSL into domain-focused files makes the codebase navigable.
+- **CI + tests**: Basic Go build/test/vet/fmt checks are present and fast.
+- **Examples**: Realistic examples reduce time-to-first-success.
+
+### Top issues (must address)
+
+#### Security & safety (P0)
+
+- **Host key verification is disabled** (`ssh.InsecureIgnoreHostKey()` in `Connect`). This is not acceptable for production.
+- **Shell injection risk**: Most executor actions construct shell commands via string concatenation with unescaped user input (`Src`, `Dest`, `Body`). This is a broad attack surface.
+- **Sudo password handling**: `echo <password> | sudo -S ...` risks leaking secrets via process inspection and logs.
+
+#### Correctness & UX (P0)
+
+- **Changed vs OK semantics are incorrect**: successful tasks are currently counted as `Changed` even when nothing changed. This makes reporting untrustworthy.
+- **`Template(...)` semantics are unclear**: the public DSL suggests generic template/file writing, but execution behavior is coupled to systemd service file installation.
+- **Quoting/whitespace bugs**: paths containing spaces or special characters will break due to lack of proper quoting/escaping.
+
+#### Architecture & maintainability (P1)
+
+- **Stringly-typed action dispatcher**: `Task.Action` is effectively an unvalidated protocol. There are no compile-time guarantees and it’s easy to introduce inconsistencies.
+- **Executor responsibilities are too broad**: `executor.go` mixes orchestration, progress reporting, templating, systemd, docker, rsync, etc.
+- **Options encoded into `Body`** (`key:val;key:val`) is brittle and encourages parsing bugs.
+
+### Recommended roadmap
+
+#### P0 (security + correctness)
+
+- **Add strict host key verification**:
+  - Support `known_hosts` and/or allow passing a `HostKeyCallback`.
+- **Stop building shell commands via concatenation**:
+  - Use a safe command builder (at minimum, robust quoting/escaping).
+  - Prefer direct APIs when available (SFTP for file ops; structured `systemctl` calls).
+- **Fix status semantics**:
+  - Separate `OK` from `Changed` with real detection or explicit “changed” flags per action.
+- **Clarify/rename `Template` behavior**:
+  - Either make `Template` truly generic, or rename systemd-specific behavior to something explicit (e.g., `SystemdServiceTemplate`).
+
+#### P1 (structure)
+
+- **Refactor executor into domain handlers**:
+  - `executor_file.go`, `executor_systemd.go`, `executor_docker.go`, etc.
+  - Replace the big switch with a handler map or typed action interface.
+- **Introduce typed configs for complex actions** (instead of packing options into `Body`).
+
+#### P2 (polish + DX)
+
+- Add `golangci-lint` (or comparable) with a small, deliberate ruleset.
+- Add more executor-level tests (golden tests for generated commands, and integration tests behind a build tag).
+- Document the project’s compatibility guarantees (what is stable API vs internal).
 
 ## Contributing
 

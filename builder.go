@@ -47,6 +47,9 @@ func (b TaskBuilder) Creates(path string) TaskBuilder { b.t.Creates = path; retu
 // User runs the task in user-level systemd context.
 func (b TaskBuilder) User() TaskBuilder { b.t.User = true; return b }
 
+// UserMode is an alias for User() - runs the task in user-level systemd context.
+func (b TaskBuilder) UserMode() TaskBuilder { b.t.User = true; return b }
+
 // Sudo runs the task with elevated privileges.
 func (b TaskBuilder) Sudo() TaskBuilder { b.t.Sudo = true; return b }
 

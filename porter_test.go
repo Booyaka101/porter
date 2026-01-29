@@ -128,8 +128,12 @@ func TestConditions(t *testing.T) {
 		{"IfNot - true", IfNot("enabled"), false},
 		{"IfSet - exists", IfSet("value"), true},
 		{"IfSet - not exists", IfSet("nonexistent"), false},
+		{"IfNotSet - exists", IfNotSet("value"), false},
+		{"IfNotSet - not exists", IfNotSet("nonexistent"), true},
 		{"IfEquals - match", IfEquals("value", "hello"), true},
 		{"IfEquals - no match", IfEquals("value", "world"), false},
+		{"IfNotEquals - match", IfNotEquals("value", "world"), true},
+		{"IfNotEquals - no match", IfNotEquals("value", "hello"), false},
 	}
 
 	for _, tt := range tests {

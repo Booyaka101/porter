@@ -1,0 +1,79 @@
+services:
+  # Default: Single container with SQLite (includes auth)
+  porter:
+    build: .
+    image: porter:latest
+    container_name: porter
+    restart: unless-stopped
+    ports:
+      - "8069:8069"
+    volumes:
+      - porter-data:/app/data
+      - ~/.ssh:/home/porter/.ssh:ro
+    environment:
+      - PORT=8069
+      - USE_SQLITE=true
+      - TZ=UTC
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8069/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Porter with MySQL (enables authentication)
+  porter-mysql:
+    build: .
+    image: porter:latest
+    container_name: porter-mysql
+    restart: unless-stopped
+    ports:
+      - "8069:8069"
+    volumes:
+      - porter-mysql-data:/app/data
+      - ~/.ssh:/home/porter/.ssh:ro
+    environment:
+      - PORT=8069
+      - USE_MYSQL=true
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=porter
+      - DB_PASSWORD=porter_secret
+      - DB_NAME=porter
+      - TZ=UTC
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8069/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - mysql
+
+  mysql:
+    image: mysql:8.0
+    container_name: porter-mysql-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_secret
+      - MYSQL_DATABASE=porter
+      - MYSQL_USER=porter
+      - MYSQL_PASSWORD=porter_secret
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    profiles:
+      - mysql
+
+volumes:
+  porter-data:
+  porter-mysql-data:
+  mysql-data:

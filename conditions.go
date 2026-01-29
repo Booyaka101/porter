@@ -18,8 +18,14 @@ func IfNot(key string) When { return func(v *Vars) bool { return !v.GetBool(key)
 // IfSet returns true if the variable is set (non-empty).
 func IfSet(key string) When { return func(v *Vars) bool { return v.Get(key) != "" } }
 
+// IfNotSet returns true if the variable is not set (empty).
+func IfNotSet(key string) When { return func(v *Vars) bool { return v.Get(key) == "" } }
+
 // IfEquals returns true if the variable equals the given value.
 func IfEquals(key, val string) When { return func(v *Vars) bool { return v.Get(key) == val } }
+
+// IfNotEquals returns true if the variable does not equal the given value.
+func IfNotEquals(key, val string) When { return func(v *Vars) bool { return v.Get(key) != val } }
 
 // Not negates a condition.
 func Not(c When) When { return func(v *Vars) bool { return !c(v) } }

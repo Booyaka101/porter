@@ -135,3 +135,35 @@ func (b TaskBuilder) Network(n string) TaskBuilder { return b.appendOpt("network
 
 // Detach runs the container in the background.
 func (b TaskBuilder) Detach() TaskBuilder { return b.appendOpt("detach", "true") }
+
+// =============================================================================
+// DOCKER LIST/INFO OPERATIONS
+// =============================================================================
+
+// DockerPs lists containers. Use .All() to include stopped containers.
+func DockerPs() TaskBuilder {
+	return TaskBuilder{Task{Action: "docker_ps", Name: "List containers"}}
+}
+
+// DockerImages lists images.
+func DockerImages() TaskBuilder {
+	return TaskBuilder{Task{Action: "docker_images", Name: "List images"}}
+}
+
+// DockerVolumes lists volumes.
+func DockerVolumes() TaskBuilder {
+	return TaskBuilder{Task{Action: "docker_volumes", Name: "List volumes"}}
+}
+
+// DockerNetworks lists networks.
+func DockerNetworks() TaskBuilder {
+	return TaskBuilder{Task{Action: "docker_networks", Name: "List networks"}}
+}
+
+// DockerInfo returns Docker system information.
+func DockerInfo() TaskBuilder {
+	return TaskBuilder{Task{Action: "docker_info", Name: "Docker info"}}
+}
+
+// All includes all items (e.g., stopped containers).
+func (b TaskBuilder) All() TaskBuilder { return b.appendOpt("all", "true") }

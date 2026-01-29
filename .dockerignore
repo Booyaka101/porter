@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+porter
+porter-*
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Node modules (will be installed in container)
+ui/node_modules
+ui/build
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (should be mounted as volumes)
+*.db
+*.db-journal
+data/
+machines.json
+history.json
+custom_scripts.json
+bookmarks.json
+scheduler_jobs.json
+ssh_keys.json
+notifications.json
+backup_jobs.json
+
+# Documentation
+*.md
+!README.md
+
+# Examples (not needed in container)
+examples/
+
+# Coverage
+coverage.out
+coverage.html
+
+# Environment files
+.env
+.env.local
+*.env
+
+# Logs
+*.log

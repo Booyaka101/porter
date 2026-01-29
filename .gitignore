@@ -4,6 +4,8 @@
 *.dll
 *.so
 *.dylib
+porter
+cmd/porter/porter
 
 # Test binary
 *.test
@@ -19,7 +21,42 @@ go.work
 .vscode/
 *.swp
 *.swo
+*.code-workspace
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Build artifacts
+cmd/porter/build/
+ui/build/
+ui/node_modules/
+
+# Data files
+*.db
+*.db-journal
+*.json.bak
+data/
+machines.json
+history.json
+custom_scripts.json
+bookmarks.json
+scheduler_jobs.json
+ssh_keys.json
+notifications.json
+backup_jobs.json
+
+# Coverage
+coverage.out
+coverage.html
+
+# Vendor (if not committed)
+# vendor/
+
+# Environment files
+.env
+.env.local
+*.env
+
+# Logs
+*.log

@@ -42,9 +42,33 @@ func (s SvcBuilder) Enable() TaskBuilder {
 	return TaskBuilder(s)
 }
 
+// Disable disables the service from starting on boot.
+func (s SvcBuilder) Disable() TaskBuilder {
+	s.t.State = "disable"
+	s.t.Name = "Disable " + s.t.Dest
+	return TaskBuilder(s)
+}
+
+// Status gets the status of the service.
+func (s SvcBuilder) Status() TaskBuilder {
+	s.t.State = "status"
+	s.t.Name = "Status " + s.t.Dest
+	return TaskBuilder(s)
+}
+
 // DaemonReload reloads systemd configuration.
 func DaemonReload() TaskBuilder {
 	return TaskBuilder{Task{Action: "daemon_reload", Name: "Reload systemd"}}
+}
+
+// SvcList lists all systemd services. Use .User() for user services.
+func SvcList() TaskBuilder {
+	return TaskBuilder{Task{Action: "service_list", Name: "List services"}}
+}
+
+// SvcTimers lists all systemd timers. Use .User() for user timers.
+func SvcTimers() TaskBuilder {
+	return TaskBuilder{Task{Action: "timer_list", Name: "List timers"}}
 }
 
 // =============================================================================
