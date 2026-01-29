@@ -3,6 +3,7 @@ package porterui
 import (
 	"bytes"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -68,6 +69,22 @@ func InitNotifications() error {
 }
 
 func (n *NotificationStore) loadConfig() error {
+	// If using database, load from there
+	if db != nil {
+		config, err := loadNotificationConfigFromDB()
+		if err == nil {
+			n.config = config
+		} else {
+			n.config = NotificationConfig{
+				Enabled:   true,
+				OnSuccess: false,
+				OnFailure: true,
+			}
+		}
+		return nil
+	}
+
+	// Fallback to JSON file
 	data, err := os.ReadFile(n.configPath)
 	if os.IsNotExist(err) {
 		n.config = NotificationConfig{
@@ -81,6 +98,46 @@ func (n *NotificationStore) loadConfig() error {
 		return err
 	}
 	return json.Unmarshal(data, &n.config)
+}
+
+// loadNotificationConfigFromDB loads notification config from database
+func loadNotificationConfigFromDB() (NotificationConfig, error) {
+	config := NotificationConfig{
+		Enabled:   true,
+		OnSuccess: false,
+		OnFailure: true,
+	}
+
+	if db == nil {
+		return config, fmt.Errorf("database not initialized")
+	}
+
+	var enabled, onSuccess, onFailure, onScheduled int
+	var slackWebhook, emailSmtp, emailFrom, emailTo, emailPassword sql.NullString
+
+	err := db.db.QueryRow(`
+		SELECT enabled, COALESCE(slack_webhook, ''), COALESCE(email_smtp, ''), 
+		       COALESCE(email_from, ''), COALESCE(email_to, ''), COALESCE(email_password, ''),
+		       on_success, on_failure, on_scheduled
+		FROM notification_config WHERE id = 1`).
+		Scan(&enabled, &slackWebhook, &emailSmtp, &emailFrom, &emailTo, &emailPassword,
+			&onSuccess, &onFailure, &onScheduled)
+
+	if err != nil {
+		return config, err
+	}
+
+	config.Enabled = enabled == 1
+	config.OnSuccess = onSuccess == 1
+	config.OnFailure = onFailure == 1
+	config.OnScheduled = onScheduled == 1
+	config.SlackWebhook = slackWebhook.String
+	config.EmailSMTP = emailSmtp.String
+	config.EmailFrom = emailFrom.String
+	config.EmailTo = emailTo.String
+	config.EmailPassword = emailPassword.String
+
+	return config, nil
 }
 
 func (n *NotificationStore) saveConfig() error {

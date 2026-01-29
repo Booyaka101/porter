@@ -147,6 +147,19 @@ func (s *CustomScriptStore) loadIndex() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// If using database, load from there
+	if db != nil {
+		scripts, err := loadCustomScriptsFromDB()
+		if err == nil {
+			for _, script := range scripts {
+				s.scripts[script.ID] = script
+			}
+			log.Printf("Loaded %d custom scripts from database", len(s.scripts))
+		}
+		return nil
+	}
+
+	// Fallback to JSON file
 	data, err := os.ReadFile(s.indexPath())
 	if os.IsNotExist(err) {
 		return nil
@@ -165,6 +178,42 @@ func (s *CustomScriptStore) loadIndex() error {
 	}
 	log.Printf("Loaded %d custom scripts", len(s.scripts))
 	return nil
+}
+
+// loadCustomScriptsFromDB loads custom scripts from the database
+func loadCustomScriptsFromDB() ([]*CustomScript, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := db.db.Query(`
+		SELECT id, name, COALESCE(description, ''), COALESCE(category, ''), file_name,
+		       COALESCE(content, ''), size, COALESCE(tags, '[]'), created_at
+		FROM custom_scripts ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scripts []*CustomScript
+	for rows.Next() {
+		var s CustomScript
+		var tagsJSON, createdAt string
+
+		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.Category, &s.FileName,
+			&s.Content, &s.Size, &tagsJSON, &createdAt); err != nil {
+			continue
+		}
+
+		if tagsJSON != "" && tagsJSON != "[]" {
+			json.Unmarshal([]byte(tagsJSON), &s.Tags)
+		}
+		s.CreatedAt, _ = parseDateTime(createdAt)
+
+		scripts = append(scripts, &s)
+	}
+
+	return scripts, nil
 }
 
 func (s *CustomScriptStore) saveIndex() error {

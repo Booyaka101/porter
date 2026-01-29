@@ -2,6 +2,7 @@ package porterui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,6 +52,18 @@ func (b *BookmarkStore) load() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// If using database, load from there
+	if db != nil {
+		bookmarks, err := loadBookmarksFromDB()
+		if err != nil {
+			b.bookmarks = []Bookmark{}
+			return nil
+		}
+		b.bookmarks = bookmarks
+		return nil
+	}
+
+	// Fallback to JSON file
 	data, err := os.ReadFile(b.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -61,6 +74,42 @@ func (b *BookmarkStore) load() error {
 	}
 
 	return json.Unmarshal(data, &b.bookmarks)
+}
+
+// loadBookmarksFromDB loads bookmarks from the database
+func loadBookmarksFromDB() ([]Bookmark, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := db.db.Query(`
+		SELECT id, name, type, COALESCE(script_path, ''), COALESCE(command, ''),
+		       COALESCE(args, ''), COALESCE(machine_ids, '[]'), COALESCE(description, ''),
+		       COALESCE(color, '')
+		FROM bookmarks ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bookmarks []Bookmark
+	for rows.Next() {
+		var b Bookmark
+		var machineIDsJSON string
+
+		if err := rows.Scan(&b.ID, &b.Name, &b.Type, &b.ScriptPath, &b.Command,
+			&b.Args, &machineIDsJSON, &b.Description, &b.Color); err != nil {
+			continue
+		}
+
+		if machineIDsJSON != "" && machineIDsJSON != "[]" {
+			json.Unmarshal([]byte(machineIDsJSON), &b.MachineIDs)
+		}
+
+		bookmarks = append(bookmarks, b)
+	}
+
+	return bookmarks, nil
 }
 
 func (b *BookmarkStore) save() error {

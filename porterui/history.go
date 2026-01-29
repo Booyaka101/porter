@@ -97,6 +97,18 @@ func (h *HistoryStore) load() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// If using database, load from there
+	if db != nil {
+		records, err := loadHistoryFromDB()
+		if err != nil {
+			h.records = []ExecutionRecord{}
+			return nil
+		}
+		h.records = records
+		return nil
+	}
+
+	// Fallback to JSON file
 	data, err := os.ReadFile(h.filePath)
 	if os.IsNotExist(err) {
 		h.records = []ExecutionRecord{}
@@ -107,6 +119,48 @@ func (h *HistoryStore) load() error {
 	}
 
 	return json.Unmarshal(data, &h.records)
+}
+
+// loadHistoryFromDB loads execution history from the database
+func loadHistoryFromDB() ([]ExecutionRecord, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := db.db.Query(`
+		SELECT id, COALESCE(machine_id, ''), COALESCE(machine_name, ''), COALESCE(machine_ip, ''),
+		       COALESCE(script_path, ''), COALESCE(script_name, ''), COALESCE(args, ''),
+		       COALESCE(preset_name, ''), started_at, finished_at, COALESCE(duration, ''),
+		       success, COALESCE(output, ''), COALESCE(error, ''), exit_code, COALESCE(operator, '')
+		FROM execution_history ORDER BY created_at DESC LIMIT 1000`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []ExecutionRecord
+	for rows.Next() {
+		var r ExecutionRecord
+		var startedAt, finishedAt, output, errorMsg string
+		var success int
+
+		if err := rows.Scan(&r.ID, &r.MachineID, &r.MachineName, &r.MachineIP,
+			&r.ScriptPath, &r.ScriptName, &r.Args, &r.PresetName,
+			&startedAt, &finishedAt, &r.Duration, &success, &output, &errorMsg,
+			&r.ExitCode, &r.Operator); err != nil {
+			continue
+		}
+
+		r.Success = success == 1
+		r.Output = output
+		r.Error = errorMsg
+		r.StartedAt, _ = parseDateTime(startedAt)
+		r.FinishedAt, _ = parseDateTime(finishedAt)
+
+		records = append(records, r)
+	}
+
+	return records, nil
 }
 
 func (h *HistoryStore) save() error {

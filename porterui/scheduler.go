@@ -86,6 +86,18 @@ func (s *Scheduler) load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// If using database, load from there
+	if db != nil {
+		jobs, err := loadScheduledJobsFromDB()
+		if err == nil {
+			for _, job := range jobs {
+				s.jobs[job.ID] = job
+			}
+		}
+		return nil
+	}
+
+	// Fallback to JSON file
 	data, err := os.ReadFile(s.filePath)
 	if os.IsNotExist(err) {
 		return nil
@@ -103,6 +115,57 @@ func (s *Scheduler) load() error {
 		s.jobs[job.ID] = job
 	}
 	return nil
+}
+
+// loadScheduledJobsFromDB loads scheduled jobs from the database
+func loadScheduledJobsFromDB() ([]*ScheduledJob, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := db.db.Query(`
+		SELECT id, name, COALESCE(description, ''), script_path, COALESCE(args, ''),
+		       COALESCE(machine_ids, '[]'), cron_expr, enabled, last_run, next_run,
+		       COALESCE(last_status, ''), COALESCE(last_error, ''), run_count, success_count, fail_count,
+		       timeout_mins, retry_count, retry_delay_min, notify_on_fail, notify_on_success
+		FROM scheduled_jobs`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*ScheduledJob
+	for rows.Next() {
+		var j ScheduledJob
+		var machineIDsJSON, lastRun, nextRun string
+		var enabled, notifyOnFail, notifyOnSuccess int
+
+		if err := rows.Scan(&j.ID, &j.Name, &j.Description, &j.ScriptPath, &j.Args,
+			&machineIDsJSON, &j.CronExpr, &enabled, &lastRun, &nextRun,
+			&j.LastStatus, &j.LastError, &j.RunCount, &j.SuccessCount, &j.FailCount,
+			&j.TimeoutMins, &j.RetryCount, &j.RetryDelayMin, &notifyOnFail, &notifyOnSuccess); err != nil {
+			continue
+		}
+
+		j.Enabled = enabled == 1
+		j.NotifyOnFail = notifyOnFail == 1
+		j.NotifyOnSuccess = notifyOnSuccess == 1
+
+		if machineIDsJSON != "" && machineIDsJSON != "[]" {
+			json.Unmarshal([]byte(machineIDsJSON), &j.MachineIDs)
+		}
+
+		if lastRun != "" {
+			j.LastRun, _ = parseDateTime(lastRun)
+		}
+		if nextRun != "" {
+			j.NextRun, _ = parseDateTime(nextRun)
+		}
+
+		jobs = append(jobs, &j)
+	}
+
+	return jobs, nil
 }
 
 func (s *Scheduler) save() error {

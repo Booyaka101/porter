@@ -264,6 +264,21 @@ func NewMachineRepo(store *Store) *MachineRepo {
 }
 
 func (r *MachineRepo) load() {
+	// If using database, load from there
+	if db != nil {
+		machines, err := LoadMachinesFromDB()
+		if err == nil {
+			r.mu.Lock()
+			for _, m := range machines {
+				mCopy := m // Create copy to avoid pointer issues
+				r.machines[m.ID] = &mCopy
+			}
+			r.mu.Unlock()
+		}
+		return
+	}
+
+	// Fallback to JSON file
 	var machineList []*Machine
 	if err := r.store.Load("machines.json", &machineList); err == nil {
 		r.mu.Lock()
