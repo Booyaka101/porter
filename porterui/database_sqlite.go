@@ -305,13 +305,8 @@ func GetSQLitePath() string {
 		return path
 	}
 
-	// Use data directory in portable mode
-	if portableMode {
-		return filepath.Join(getDataDir(), "porter.db")
-	}
-
-	// Default to current directory
-	return "porter.db"
+	// Always use data directory for SQLite
+	return filepath.Join(getDataDir(), "porter.db")
 }
 
 // IsSQLite returns true if using SQLite database

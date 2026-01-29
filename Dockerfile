@@ -69,4 +69,4 @@ ENV USE_SQLITE=true
 
 # Run porter
 ENTRYPOINT ["/app/porter"]
-CMD ["-open=false", "-portable=true"]
+CMD ["-open=false"]
