@@ -28,19 +28,23 @@ type RunConfig struct {
 	DefaultPort int
 	// AppName is used in log messages (default: "Porter")
 	AppName string
+	// Port overrides DefaultPort (set via flag or config)
+	Port int
+	// OpenBrowser controls whether to auto-open browser
+	OpenBrowser bool
+	// PortableMode stores data alongside binary
+	PortableMode bool
+	// UseMySQL uses MySQL instead of SQLite
+	UseMySQL bool
+	// UseSQLite uses SQLite (default true)
+	UseSQLite bool
+	// MigrateData migrates JSON data to database
+	MigrateData bool
+	// MigrateFromMySQL migrates from MySQL to SQLite
+	MigrateFromMySQL bool
 }
 
-var (
-	runnerPort             = flag.Int("port", 8069, "server port")
-	runnerOpenBrowser      = flag.Bool("open", true, "auto-open browser")
-	runnerPortableMode     = flag.Bool("portable", false, "portable mode - store data alongside binary")
-	runnerUseMySQL         = flag.Bool("mysql", false, "use MySQL database instead of SQLite")
-	runnerUseSQLite        = flag.Bool("sqlite", true, "use SQLite database (default)")
-	runnerMigrateData      = flag.Bool("migrate", false, "migrate existing JSON data to database")
-	runnerMigrateFromMySQL = flag.Bool("migrate-mysql", false, "migrate data from MySQL to SQLite")
-)
-
-func openBrowser(url string) {
+func runnerOpenBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -53,8 +57,8 @@ func openBrowser(url string) {
 	cmd.Start()
 }
 
-// spaHandler serves the SPA and handles client-side routing
-func spaHandler(fileServer http.Handler, subFS fs.FS) http.Handler {
+// runnerSpaHandler serves the SPA and handles client-side routing
+func runnerSpaHandler(fileServer http.Handler, subFS fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api") {
 			http.Error(w, "Not Found", http.StatusNotFound)
@@ -100,8 +104,7 @@ func spaHandler(fileServer http.Handler, subFS fs.FS) http.Handler {
 //	    porterui.Run(porterui.RunConfig{UIBuildFS: ui})
 //	}
 func Run(config RunConfig) {
-	flag.Parse()
-
+	// Set defaults
 	if config.UIBuildRoot == "" {
 		config.UIBuildRoot = "build"
 	}
@@ -112,19 +115,49 @@ func Run(config RunConfig) {
 		config.AppName = "Porter"
 	}
 
-	// Override default port if not set via flag
-	if *runnerPort == 8069 && config.DefaultPort != 8069 {
-		*runnerPort = config.DefaultPort
+	// Determine port: config.Port > env PORT > config.DefaultPort
+	port := config.DefaultPort
+	if config.Port > 0 {
+		port = config.Port
+	}
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			port = p
+		}
+	}
+
+	// Check for flag overrides (only if flags were defined by wrapper)
+	if flag.Parsed() {
+		if f := flag.Lookup("port"); f != nil {
+			if p, err := strconv.Atoi(f.Value.String()); err == nil && p != 8069 {
+				port = p
+			}
+		}
+		if f := flag.Lookup("portable"); f != nil && f.Value.String() == "true" {
+			config.PortableMode = true
+		}
+		if f := flag.Lookup("open"); f != nil && f.Value.String() == "false" {
+			config.OpenBrowser = false
+		}
+		if f := flag.Lookup("mysql"); f != nil && f.Value.String() == "true" {
+			config.UseMySQL = true
+		}
+		if f := flag.Lookup("migrate"); f != nil && f.Value.String() == "true" {
+			config.MigrateData = true
+		}
+		if f := flag.Lookup("migrate-mysql"); f != nil && f.Value.String() == "true" {
+			config.MigrateFromMySQL = true
+		}
 	}
 
 	// Set portable mode before initializing subsystems
-	SetPortableMode(*runnerPortableMode)
-	if *runnerPortableMode {
+	SetPortableMode(config.PortableMode)
+	if config.PortableMode {
 		log.Println("Running in portable mode - data stored alongside binary")
 	}
 
 	// Handle MySQL to SQLite migration
-	if *runnerMigrateFromMySQL || os.Getenv("MIGRATE_FROM_MYSQL") == "true" {
+	if config.MigrateFromMySQL || os.Getenv("MIGRATE_FROM_MYSQL") == "true" {
 		log.Println("Starting MySQL to SQLite migration...")
 		mysqlConfig := LoadDBConfigFromEnv()
 		sqlitePath := GetSQLitePath()
@@ -139,7 +172,7 @@ func Run(config RunConfig) {
 	useMySQLEnv := os.Getenv("USE_MYSQL") == "true"
 	useSQLiteEnv := os.Getenv("USE_SQLITE") != "false"
 
-	if *runnerUseMySQL || useMySQLEnv {
+	if config.UseMySQL || useMySQLEnv {
 		log.Println("Initializing MySQL database...")
 		dbConfig := LoadDBConfigFromEnv()
 		if err := InitMySQLDatabase(dbConfig); err != nil {
@@ -153,7 +186,7 @@ func Run(config RunConfig) {
 
 		ReloadMachineRepo()
 
-		if *runnerMigrateData || os.Getenv("MIGRATE_DATA") == "true" {
+		if config.MigrateData || os.Getenv("MIGRATE_DATA") == "true" {
 			log.Println("Running data migration from JSON to MySQL...")
 			if err := MigrateFromJSON(); err != nil {
 				log.Printf("Migration completed with errors: %v", err)
@@ -161,7 +194,7 @@ func Run(config RunConfig) {
 		}
 
 		log.Println("MySQL mode enabled - using MySQL database storage")
-	} else if *runnerUseSQLite || useSQLiteEnv {
+	} else if config.UseSQLite || useSQLiteEnv {
 		log.Println("Initializing SQLite database...")
 		dbPath := GetSQLitePath()
 		if err := InitSQLiteDatabase(dbPath); err != nil {
@@ -175,7 +208,7 @@ func Run(config RunConfig) {
 
 		ReloadMachineRepo()
 
-		if *runnerMigrateData || os.Getenv("MIGRATE_DATA") == "true" {
+		if config.MigrateData || os.Getenv("MIGRATE_DATA") == "true" {
 			log.Println("Running data migration from JSON to SQLite...")
 			if err := MigrateFromJSON(); err != nil {
 				log.Printf("Migration completed with errors: %v", err)
@@ -227,18 +260,18 @@ func Run(config RunConfig) {
 		log.Fatal(err)
 	}
 	fileServer := http.FileServer(http.FS(subFS))
-	server.Router.PathPrefix("/").Handler(spaHandler(fileServer, subFS))
+	server.Router.PathPrefix("/").Handler(runnerSpaHandler(fileServer, subFS))
 
-	url := fmt.Sprintf("http://localhost:%d", *runnerPort)
+	url := fmt.Sprintf("http://localhost:%d", port)
 	log.Printf("%s starting on %s\n", config.AppName, url)
 
-	if *runnerOpenBrowser {
+	if config.OpenBrowser {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			openBrowser(url)
+			runnerOpenBrowser(url)
 		}()
 	}
 
-	server.Start("0.0.0.0:" + strconv.Itoa(*runnerPort))
+	server.Start("0.0.0.0:" + strconv.Itoa(port))
 	server.WaitClose()
 }
