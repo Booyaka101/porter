@@ -426,13 +426,22 @@ func runHealthPoll() {
 		default:
 		}
 
-		// Decrypt password for health check
-		password := GetDecryptedPassword(&machines[i])
-		machineWithPassword := machines[i]
-		machineWithPassword.Password = password
+		var health *MachineHealth
 
-		// Run health check
-		health := CheckMachineHealth(&machineWithPassword)
+		// Try agent WebSocket first if available (only works if UI has active connection)
+		if machines[i].HasAgent && machines[i].AgentPort > 0 {
+			health = fetchHealthFromAgent(&machines[i])
+		}
+
+		// Always fall back to SSH-based health check for full metrics
+		// The idx-agent only provides metrics via WebSocket when UI is connected
+		if health == nil || health.CPUUsage == "" {
+			password := GetDecryptedPassword(&machines[i])
+			machineWithPassword := machines[i]
+			machineWithPassword.Password = password
+			health = CheckMachineHealth(&machineWithPassword)
+		}
+
 		healthStore.Update(health)
 
 		// Update machine status based on health
@@ -453,54 +462,82 @@ func runHealthPoll() {
 	}
 }
 
-// fetchHealthFromAgent fetches health metrics from a standalone agent via WebSocket manager
+// fetchHealthFromAgent fetches health metrics from a standalone agent via HTTP or WebSocket
 func fetchHealthFromAgent(machine *Machine) *MachineHealth {
-	// Check if we have cached metrics from the WebSocket connection
+	// First check if we have cached metrics from an active WebSocket connection
 	standaloneAgentManager.mu.RLock()
 	conn, exists := standaloneAgentManager.connections[machine.ID]
 	standaloneAgentManager.mu.RUnlock()
 
-	if !exists || conn == nil {
+	if exists && conn != nil && time.Since(conn.LastSeen) < 30*time.Second {
+		metrics := conn.Metrics
+		return &MachineHealth{
+			MachineID:     machine.ID,
+			MachineName:   machine.Name,
+			IP:            machine.IP,
+			Online:        true,
+			LastChecked:   time.Now(),
+			LastOnline:    time.Now(),
+			ResponseTime:  0,
+			Uptime:        metrics.Uptime,
+			LoadAvg:       metrics.LoadAverage,
+			CPUUsage:      fmt.Sprintf("%.1f%%", metrics.CPUUsage),
+			CPUCores:      fmt.Sprintf("%d", metrics.CPUCores),
+			CPUModel:      metrics.CPUModel,
+			MemoryUsage:   fmt.Sprintf("%.1f%%", metrics.MemoryUsage),
+			MemoryTotal:   metrics.MemoryTotal,
+			MemoryFree:    metrics.MemoryUsed,
+			DiskUsage:     fmt.Sprintf("%.1f%%", metrics.DiskUsage),
+			DiskTotal:     metrics.DiskTotal,
+			DiskFree:      metrics.DiskUsed,
+			ProcessCount:  fmt.Sprintf("%d", metrics.ProcessCount),
+			LoggedUsers:   fmt.Sprintf("%d", len(metrics.LoggedInUsers)),
+			Hostname:      metrics.Hostname,
+			KernelVersion: metrics.KernelVersion,
+			OSInfo:        metrics.OSInfo,
+			NetworkRX:     metrics.NetworkRX,
+			NetworkTX:     metrics.NetworkTX,
+		}
+	}
+
+	// Fall back to direct HTTP request to agent
+	return fetchHealthFromAgentHTTP(machine)
+}
+
+// fetchHealthFromAgentHTTP checks if agent is reachable via HTTP (for status only)
+// The idx-agent only provides metrics via WebSocket, not HTTP
+func fetchHealthFromAgentHTTP(machine *Machine) *MachineHealth {
+	if machine.AgentPort == 0 {
 		return nil
 	}
 
-	// Check if metrics are recent (within 30 seconds)
-	if time.Since(conn.LastSeen) > 30*time.Second {
+	client := &http.Client{Timeout: 3 * time.Second}
+	start := time.Now()
+
+	// Just check if agent is reachable
+	resp, err := client.Get(fmt.Sprintf("http://%s:%d/", machine.IP, machine.AgentPort))
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
 		return nil
 	}
 
-	metrics := conn.Metrics
+	responseTime := time.Since(start)
 
-	// Convert agent metrics to MachineHealth format
-	health := &MachineHealth{
-		MachineID:     machine.ID,
-		MachineName:   machine.Name,
-		IP:            machine.IP,
-		Online:        true,
-		LastChecked:   time.Now(),
-		LastOnline:    time.Now(),
-		ResponseTime:  0,
-		Uptime:        metrics.Uptime,
-		LoadAvg:       metrics.LoadAverage,
-		CPUUsage:      fmt.Sprintf("%.1f%%", metrics.CPUUsage),
-		CPUCores:      fmt.Sprintf("%d", metrics.CPUCores),
-		CPUModel:      metrics.CPUModel,
-		MemoryUsage:   fmt.Sprintf("%.1f%%", metrics.MemoryUsage),
-		MemoryTotal:   metrics.MemoryTotal,
-		MemoryFree:    metrics.MemoryUsed,
-		DiskUsage:     fmt.Sprintf("%.1f%%", metrics.DiskUsage),
-		DiskTotal:     metrics.DiskTotal,
-		DiskFree:      metrics.DiskUsed,
-		ProcessCount:  fmt.Sprintf("%d", metrics.ProcessCount),
-		LoggedUsers:   fmt.Sprintf("%d", len(metrics.LoggedInUsers)),
-		Hostname:      metrics.Hostname,
-		KernelVersion: metrics.KernelVersion,
-		OSInfo:        metrics.OSInfo,
-		NetworkRX:     metrics.NetworkRX,
-		NetworkTX:     metrics.NetworkTX,
+	// Agent is reachable but metrics need WebSocket - return minimal health
+	// The full metrics will be fetched via SSH as fallback
+	return &MachineHealth{
+		MachineID:    machine.ID,
+		MachineName:  machine.Name,
+		IP:           machine.IP,
+		Online:       true,
+		LastChecked:  time.Now(),
+		LastOnline:   time.Now(),
+		ResponseTime: responseTime.Milliseconds(),
 	}
-
-	return health
 }
 
 // HealthRoutes sets up health check API routes
@@ -522,6 +559,19 @@ func HealthRoutes(r *mux.Router) {
 		if machine.HasAgent && machine.AgentPort > 0 {
 			health := fetchHealthFromAgent(machine)
 			if health != nil {
+				healthStore.Update(health)
+				json.NewEncoder(w).Encode(health)
+				return
+			}
+		} else if !machine.HasAgent {
+			// Try to auto-detect agent on default port 8083
+			testMachine := *machine
+			testMachine.AgentPort = 8083
+			testMachine.HasAgent = true
+			health := fetchHealthFromAgent(&testMachine)
+			if health != nil {
+				// Agent detected! Update machine record
+				machineRepo.UpdateAgentStatus(machine.ID, true, 8083)
 				healthStore.Update(health)
 				json.NewEncoder(w).Encode(health)
 				return

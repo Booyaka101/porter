@@ -36,6 +36,8 @@ func SetupRoutes(r *mux.Router) {
 	MultiTerminalRoutes(r)
 	ImportExportRoutes(r)
 	DashboardWSRoutes(r)
+	SetupStandaloneAgentRoutes(r)
+	SetupAgentRoutes(r)
 }
 
 // SetupRoutesWithAuth sets up routes with authentication middleware

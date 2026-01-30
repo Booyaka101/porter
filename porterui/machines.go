@@ -565,6 +565,13 @@ func init() {
 	execTracker = NewExecutionTracker()
 }
 
+// ReloadMachineRepo reloads machines from database after DB is initialized
+func ReloadMachineRepo() {
+	if db != nil && machineRepo != nil {
+		machineRepo.load()
+	}
+}
+
 // ============================================================================
 // HELPERS
 // ============================================================================

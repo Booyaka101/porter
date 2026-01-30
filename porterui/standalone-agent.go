@@ -54,6 +54,116 @@ var standaloneAgentManager = &StandaloneAgentManager{
 	connections: make(map[string]*StandaloneAgentConnection),
 }
 
+var (
+	agentPollerRunning bool
+	agentPollerStop    chan struct{}
+)
+
+// StartAgentPoller starts background WebSocket connections to all agents
+func StartAgentPoller() {
+	if agentPollerRunning {
+		return
+	}
+
+	agentPollerStop = make(chan struct{})
+	agentPollerRunning = true
+
+	go func() {
+		// Initial delay
+		time.Sleep(10 * time.Second)
+
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		// Initial connection
+		connectToAllAgents()
+
+		for {
+			select {
+			case <-ticker.C:
+				connectToAllAgents()
+			case <-agentPollerStop:
+				agentPollerRunning = false
+				return
+			}
+		}
+	}()
+}
+
+// StopAgentPoller stops the background agent connections
+func StopAgentPoller() {
+	if agentPollerRunning && agentPollerStop != nil {
+		close(agentPollerStop)
+	}
+}
+
+// connectToAllAgents connects to all machines with has_agent=true
+func connectToAllAgents() {
+	machines, err := LoadMachines()
+	if err != nil {
+		return
+	}
+
+	for _, m := range machines {
+		if !m.HasAgent || m.AgentPort == 0 {
+			continue
+		}
+
+		// Check if already connected
+		standaloneAgentManager.mu.RLock()
+		conn, exists := standaloneAgentManager.connections[m.ID]
+		standaloneAgentManager.mu.RUnlock()
+
+		if exists && conn != nil && time.Since(conn.LastSeen) < 60*time.Second {
+			continue // Already connected and active
+		}
+
+		// Connect to agent in background
+		go connectToAgent(m.ID, m.IP, m.AgentPort)
+	}
+}
+
+// connectToAgent establishes a WebSocket connection to an agent
+func connectToAgent(machineID, ip string, port int) {
+	agentURL := fmt.Sprintf("ws://%s:%d/ws", ip, port)
+	agentConn, _, err := websocket.DefaultDialer.Dial(agentURL, nil)
+	if err != nil {
+		return
+	}
+
+	// Store connection
+	standaloneAgentManager.mu.Lock()
+	standaloneAgentManager.connections[machineID] = &StandaloneAgentConnection{
+		MachineID: machineID,
+		Conn:      agentConn,
+		LastSeen:  time.Now(),
+	}
+	standaloneAgentManager.mu.Unlock()
+
+	// Read messages from agent
+	for {
+		_, message, err := agentConn.ReadMessage()
+		if err != nil {
+			break
+		}
+
+		standaloneAgentManager.mu.Lock()
+		if conn := standaloneAgentManager.connections[machineID]; conn != nil {
+			conn.LastSeen = time.Now()
+			if err := json.Unmarshal(message, &conn.Metrics); err == nil {
+				updateHealthStoreFromStandaloneAgent(machineID, conn.Metrics)
+			}
+		}
+		standaloneAgentManager.mu.Unlock()
+	}
+
+	// Connection closed
+	agentConn.Close()
+	standaloneAgentManager.mu.Lock()
+	delete(standaloneAgentManager.connections, machineID)
+	standaloneAgentManager.mu.Unlock()
+}
+
 var standaloneUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // Allow all origins for agent connections
