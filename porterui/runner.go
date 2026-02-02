@@ -254,8 +254,17 @@ func Run(config RunConfig) {
 
 	SetupRoutes(server.Router)
 
-	// Serve embedded SPA
-	subFS, err := fs.Sub(config.UIBuildFS, config.UIBuildRoot)
+	// Serve embedded SPA - use default UI if none provided
+	uiFS := config.UIBuildFS
+	uiRoot := config.UIBuildRoot
+	if uiFS == (embed.FS{}) {
+		uiFS = DefaultUIBuildFS
+		uiRoot = DefaultUIBuildRoot
+	}
+	if uiRoot == "" {
+		uiRoot = "build"
+	}
+	subFS, err := fs.Sub(uiFS, uiRoot)
 	if err != nil {
 		log.Fatal(err)
 	}
