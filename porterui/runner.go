@@ -42,6 +42,8 @@ type RunConfig struct {
 	MigrateData bool
 	// MigrateFromMySQL migrates from MySQL to SQLite
 	MigrateFromMySQL bool
+	// CustomRoutes allows wrappers to add custom API routes
+	CustomRoutes func(r *mux.Router)
 }
 
 func runnerOpenBrowser(url string) {
@@ -253,6 +255,11 @@ func Run(config RunConfig) {
 	}
 
 	SetupRoutes(server.Router)
+
+	// Add custom routes from wrapper
+	if config.CustomRoutes != nil {
+		config.CustomRoutes(server.Router)
+	}
 
 	// Serve embedded SPA - use default UI if none provided
 	uiFS := config.UIBuildFS
