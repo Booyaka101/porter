@@ -9,9 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.24', '1.25']
 
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: '1.25'
           cache: false
 
       - name: Verify dependencies
@@ -33,7 +30,6 @@ jobs:
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
-        if: matrix.go-version == '1.25'
         with:
           files: ./coverage.out
           fail_ci_if_error: false
