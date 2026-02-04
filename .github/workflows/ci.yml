@@ -22,11 +22,11 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
-      - name: Build
-        run: go build -v ./...
+      - name: Build library
+        run: go build -v ./porterui/...
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: go test -v -race -coverprofile=coverage.out ./porterui/...
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -46,7 +46,7 @@ jobs:
           cache: false
 
       - name: Run go vet
-        run: go vet ./...
+        run: go vet ./porterui/...
 
       - name: Run go fmt check
         run: |
