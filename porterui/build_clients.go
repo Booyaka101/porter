@@ -20,6 +20,7 @@ type BuildClient struct {
 	Customer  string `json:"customer"`
 	Pack      string `json:"pack"`
 	Branch    string `json:"branch"`
+	Version   string `json:"version,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
@@ -82,7 +83,7 @@ func loadBuildClientsFromDB() ([]BuildClient, error) {
 	}
 
 	rows, err := db.db.Query(`
-		SELECT id, name, customer, pack, branch, 
+		SELECT id, name, customer, pack, branch, COALESCE(version, ''),
 		       COALESCE(created_at, ''), COALESCE(updated_at, '')
 		FROM build_clients ORDER BY name`)
 	if err != nil {
@@ -94,7 +95,7 @@ func loadBuildClientsFromDB() ([]BuildClient, error) {
 	for rows.Next() {
 		var c BuildClient
 		if err := rows.Scan(&c.ID, &c.Name, &c.Customer, &c.Pack, &c.Branch,
-			&c.CreatedAt, &c.UpdatedAt); err != nil {
+			&c.Version, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			continue
 		}
 		clients = append(clients, c)
@@ -123,9 +124,9 @@ func saveBuildClientToDB(client BuildClient) error {
 	now := time.Now().Format(time.RFC3339)
 	_, err := db.db.Exec(`
 		INSERT OR REPLACE INTO build_clients 
-		(id, name, customer, pack, branch, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM build_clients WHERE id = ?), ?), ?)`,
-		client.ID, client.Name, client.Customer, client.Pack, client.Branch,
+		(id, name, customer, pack, branch, version, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM build_clients WHERE id = ?), ?), ?)`,
+		client.ID, client.Name, client.Customer, client.Pack, client.Branch, client.Version,
 		client.ID, now, now)
 
 	return err
@@ -140,8 +141,8 @@ func deleteBuildClientFromDB(id string) error {
 	return err
 }
 
-// Add adds a new build client
-func (s *BuildClientStore) Add(client BuildClient) error {
+// Add adds a new build client and returns the created client with ID
+func (s *BuildClientStore) Add(client *BuildClient) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -151,10 +152,10 @@ func (s *BuildClientStore) Add(client BuildClient) error {
 	client.CreatedAt = time.Now().Format(time.RFC3339)
 	client.UpdatedAt = client.CreatedAt
 
-	s.clients = append(s.clients, client)
+	s.clients = append(s.clients, *client)
 
 	if db != nil {
-		return saveBuildClientToDB(client)
+		return saveBuildClientToDB(*client)
 	}
 	return s.save()
 }
@@ -244,7 +245,7 @@ func BuildClientRoutes(r *mux.Router) {
 			return
 		}
 
-		if err := buildClientStore.Add(client); err != nil {
+		if err := buildClientStore.Add(&client); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

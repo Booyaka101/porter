@@ -287,6 +287,7 @@ func (d *Database) migrateSQLite() error {
 			customer TEXT NOT NULL,
 			pack TEXT,
 			branch TEXT NOT NULL,
+			version TEXT,
 			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 			updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 		)`,

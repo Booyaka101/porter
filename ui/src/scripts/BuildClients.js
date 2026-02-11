@@ -37,6 +37,7 @@ const BuildClients = () => {
     const [buildDialogOpen, setBuildDialogOpen] = useState(false)
     const [selectedClient, setSelectedClient] = useState(null)
     const [selectedMachine, setSelectedMachine] = useState('')
+    const [buildVersion, setBuildVersion] = useState('')
     const [building, setBuilding] = useState({})
     const [error, setError] = useState('')
 
@@ -132,6 +133,7 @@ const BuildClients = () => {
 
     const handleOpenBuildDialog = (client) => {
         setSelectedClient(client)
+        setBuildVersion(client.version || '')
         setBuildDialogOpen(true)
     }
 
@@ -143,7 +145,7 @@ const BuildClients = () => {
 
         try {
             // Build the args string for buildBundle.sh
-            const args = `--customer=${selectedClient.customer} --pack=${selectedClient.pack} --branch=${selectedClient.branch} --auto-install`
+            const args = `--customer=${selectedClient.customer} --pack=${selectedClient.pack} --branch=${selectedClient.branch}${buildVersion ? ` --version=${buildVersion}` : ''} --auto-install`
 
             // Trigger the script execution using Porter's API
             const execRes = await fetch('/api/execute-script', {
@@ -338,6 +340,17 @@ const BuildClients = () => {
                                 ))}
                             </Select>
                         </FormControl>
+                        <TextField
+                            label="Version"
+                            value={buildVersion}
+                            onChange={(e) => setBuildVersion(e.target.value)}
+                            fullWidth
+                            placeholder="e.g., 1.2.3"
+                            sx={{ mt: 2 }}
+                            required
+                            error={!buildVersion}
+                            helperText={!buildVersion ? "Version is required for the build" : ""}
+                        />
                         <Box sx={{ mt: 2, p: 2, bgcolor: colors.background, borderRadius: 1 }}>
                             <Typography variant="body2" sx={{ color: colors.text.muted, mb: 1 }}>
                                 Build will run with:
@@ -345,6 +358,7 @@ const BuildClients = () => {
                             <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>--customer={selectedClient?.customer}</Typography>
                             <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>--pack={selectedClient?.pack}</Typography>
                             <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>--branch={selectedClient?.branch}</Typography>
+                            {buildVersion && <Typography variant="body2" sx={{ fontFamily: 'monospace', color: colors.primary }}>--version={buildVersion}</Typography>}
                             <Typography variant="body2" sx={{ fontFamily: 'monospace', color: colors.success }}>--auto-install</Typography>
                         </Box>
                     </Box>
@@ -355,7 +369,7 @@ const BuildClients = () => {
                         onClick={handleBuild} 
                         variant="contained"
                         startIcon={<PlayArrowIcon />}
-                        disabled={!selectedMachine}
+                        disabled={!selectedMachine || !buildVersion}
                         sx={{ bgcolor: colors.success }}
                     >
                         Start Build
