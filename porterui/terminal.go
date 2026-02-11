@@ -246,22 +246,13 @@ func TerminalRoutes(r *mux.Router) {
 		}
 		terminalManager.Add(termSession)
 
-		// Start shell - admin users get root shell with fish, operators get regular shell
+		// Start shell - all users get the same shell (fish with bash fallback)
 		var shellCmd string
-		filterPassword := false
-		if isAdmin {
-			// Admin users: start sudo -i, we'll send password and filter output
-			shellCmd = "sudo -i"
-			filterPassword = true
+		if shell == "fish" {
+			shellCmd = "fish || bash"
 		} else {
-			// Operator users: regular shell as configured user
-			if shell == "fish" {
-				shellCmd = "fish || bash"
-			} else {
-				shellCmd = shell
-			}
+			shellCmd = shell
 		}
-		_ = filterPassword // Will be used in output filtering
 
 		if err := session.Start(shellCmd); err != nil {
 			wsConn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31mShell start failed: %v\x1b[0m\r\n", err)))
@@ -269,36 +260,7 @@ func TerminalRoutes(r *mux.Router) {
 			return
 		}
 
-		// For admin users, send password after sudo prompt appears
-		if filterPassword {
-			go func() {
-				time.Sleep(500 * time.Millisecond)
-				termSession.mu.Lock()
-				if !termSession.closed {
-					stdinPipe.Write([]byte(password + "\n"))
-				}
-				termSession.mu.Unlock()
-
-				// Start fish after getting root shell, then clear screen
-				time.Sleep(700 * time.Millisecond)
-				termSession.mu.Lock()
-				if !termSession.closed {
-					// Start fish and immediately clear the screen to hide all previous output
-					stdinPipe.Write([]byte("fish 2>/dev/null || bash; clear\n"))
-				}
-				termSession.mu.Unlock()
-
-				// Send another clear after fish starts
-				time.Sleep(500 * time.Millisecond)
-				termSession.mu.Lock()
-				if !termSession.closed {
-					stdinPipe.Write([]byte("clear\n"))
-				}
-				termSession.mu.Unlock()
-			}()
-		}
-
-		// Pipe stdout to WebSocket with password filtering
+		// Pipe stdout to WebSocket
 		go func() {
 			buf := make([]byte, 4096)
 			for {
@@ -308,17 +270,6 @@ func TerminalRoutes(r *mux.Router) {
 				}
 				if n > 0 {
 					output := buf[:n]
-
-					// Filter any output containing the actual password
-					if filterPassword {
-						outputStr := string(output)
-						if strings.Contains(outputStr, password) {
-							// Replace password with asterisks
-							outputStr = strings.ReplaceAll(outputStr, password, "********")
-							output = []byte(outputStr)
-						}
-					}
-
 					termSession.mu.Lock()
 					if !termSession.closed {
 						wsConn.WriteMessage(websocket.BinaryMessage, output)
