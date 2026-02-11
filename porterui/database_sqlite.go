@@ -49,6 +49,10 @@ func InitSQLiteDatabase(dbPath string) error {
 	err = conn.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'").Scan(&tableCount)
 	if err == nil && tableCount > 0 {
 		log.Println("SQLite database tables already exist, skipping migrations")
+		// Still run migrations for new tables that may not exist
+		if err := db.migrateNewTables(); err != nil {
+			log.Printf("New table migration warning: %v", err)
+		}
 	} else {
 		// Run migrations only if tables don't exist
 		log.Println("Running SQLite database migrations...")
@@ -309,6 +313,33 @@ func (d *Database) migrateSQLite() error {
 	}
 
 	log.Println("SQLite database migrations completed")
+	return nil
+}
+
+// migrateNewTables creates new tables that may not exist in older databases
+func (d *Database) migrateNewTables() error {
+	newTables := []string{
+		// Build clients table - added in v0.9.1
+		`CREATE TABLE IF NOT EXISTS build_clients (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			customer TEXT NOT NULL,
+			pack TEXT,
+			branch TEXT NOT NULL,
+			version TEXT,
+			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_build_clients_name ON build_clients(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_build_clients_customer ON build_clients(customer)`,
+	}
+
+	for _, migration := range newTables {
+		if _, err := d.db.Exec(migration); err != nil {
+			log.Printf("New table migration warning: %v", err)
+		}
+	}
+
 	return nil
 }
 
