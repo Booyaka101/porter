@@ -52,6 +52,8 @@ const ScriptWizard = () => {
     const preSelectedMachineIds = searchParams.get('machines')?.split(',').filter(Boolean) || []
     // Get execId for reconnection to running script
     const reconnectExecId = searchParams.get('execId')
+    // Get step to skip directly to (e.g., step=3 for Review & Execute)
+    const skipToStep = searchParams.get('step') ? parseInt(searchParams.get('step'), 10) - 1 : null
     
     const [script, setScript] = useState(null)
     const [machines, setMachines] = useState([])
@@ -179,8 +181,12 @@ const ScriptWizard = () => {
                 )
                 if (validIds.length > 0) {
                     setSelectedMachines(validIds)
-                    // Skip to step 1 (Configure Options) if machines are pre-selected
-                    setActiveStep(1)
+                    // Skip to specified step, or step 1 (Configure Options) if machines are pre-selected
+                    if (skipToStep !== null && skipToStep >= 0 && skipToStep <= 2) {
+                        setActiveStep(skipToStep)
+                    } else {
+                        setActiveStep(1)
+                    }
                 }
             }
         } catch (err) {

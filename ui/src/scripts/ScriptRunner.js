@@ -84,8 +84,6 @@ const ImportExport = lazy(() => import('./ImportExport'))
 const MachineComparison = lazy(() => import('./MachineComparison'))
 const ApiDocs = lazy(() => import('./ApiDocs'))
 const Webhooks = lazy(() => import('./Webhooks'))
-const BuildClients = lazy(() => import('./BuildClients'))
-const BuildOutput = lazy(() => import('./BuildOutput'))
 
 // Loading fallback component
 const LoadingFallback = () => (
@@ -230,7 +228,6 @@ const ScriptRunner = () => {
         { id: 'dashboard', label: 'Dashboard', icon: <HomeIcon />, path: '/' },
         { id: 'machines', label: 'Machines', icon: <ComputerIcon />, path: '/machines' },
         { id: 'scripts', label: 'Scripts', icon: <CodeIcon />, path: '/scripts' },
-        { id: 'build-clients', label: 'Build Clients', icon: <BuildIcon />, path: '/build-clients' },
         { id: 'history', label: 'History', icon: <HistoryIcon />, path: '/history' },
         // Only show Tools menu for users with tools access
         ...(canAccessTools() ? [{ id: 'tools', label: 'Tools', icon: <BuildIcon />, path: null, hasMenu: true }] : []),
@@ -743,8 +740,6 @@ const ScriptRunner = () => {
                             <Route path="/compare" element={<MachineComparison />} />
                             <Route path="/api-docs" element={<ApiDocs />} />
                             <Route path="/webhooks" element={<Webhooks />} />
-                            <Route path="/build-clients" element={<BuildClients />} />
-                            <Route path="/build-output" element={<BuildOutput />} />
                             <Route path="*" element={<Dashboard />} />
                         </Routes>
                     </Suspense>

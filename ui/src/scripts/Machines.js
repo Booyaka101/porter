@@ -1226,10 +1226,10 @@ const Machines = () => {
                                                     </Tooltip>
                                                 )}
                                                 {(m.tags?.includes('build') || m.tags?.includes('deploy')) && (
-                                                    <Tooltip title="Build Client">
+                                                    <Tooltip title="Build Bundle">
                                                         <IconButton 
                                                             size="small" 
-                                                            onClick={() => navigate(`/build-clients?machine=${m.id}`)}
+                                                            onClick={() => navigate(`/scripts/build-deploy/buildBundle.sh?machines=${m.id}&step=3`)}
                                                             sx={{ 
                                                                 color: '#00bcd4',
                                                                 background: 'rgba(0, 188, 212, 0.1)',
