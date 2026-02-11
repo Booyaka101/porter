@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -29,6 +29,9 @@ import { colors } from './theme'
 
 const BuildClients = () => {
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
+    const preselectedMachineId = searchParams.get('machine')
+    
     const [clients, setClients] = useState([])
     const [machines, setMachines] = useState([])
     const [loading, setLoading] = useState(true)
@@ -50,7 +53,7 @@ const BuildClients = () => {
 
     useEffect(() => {
         loadData()
-    }, [])
+    }, [preselectedMachineId])
 
     const loadData = async () => {
         try {
@@ -66,7 +69,10 @@ const BuildClients = () => {
                 m.tags?.includes('build') || m.tags?.includes('deploy')
             )
             setMachines(buildMachines)
-            if (buildMachines.length > 0) {
+            // Use preselected machine from URL if available, otherwise use first build machine
+            if (preselectedMachineId && buildMachines.find(m => m.id === preselectedMachineId)) {
+                setSelectedMachine(preselectedMachineId)
+            } else if (buildMachines.length > 0) {
                 setSelectedMachine(buildMachines[0].id)
             }
         } catch (err) {
@@ -162,9 +168,9 @@ const BuildClients = () => {
 
             const result = await execRes.json()
             
-            // Navigate to the execution view to see stages and output
+            // Navigate to the live build output page
             if (result.id) {
-                navigate(`/history?execution=${result.id}`)
+                navigate(`/build-output?id=${result.id}`)
             }
         } catch (err) {
             setError('Failed to trigger build: ' + err.message)

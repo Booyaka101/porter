@@ -39,6 +39,7 @@ import WarningIcon from '@mui/icons-material/Warning'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import TerminalIcon from '@mui/icons-material/Terminal'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
+import BuildIcon from '@mui/icons-material/Build'
 import FolderIcon from '@mui/icons-material/Folder'
 import FileUploadIcon from '@mui/icons-material/FileUpload'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
@@ -1221,6 +1222,21 @@ const Machines = () => {
                                                             }}
                                                         >
                                                             <RocketLaunchIcon fontSize="small" />
+                                                        </IconButton>
+                                                    </Tooltip>
+                                                )}
+                                                {(m.tags?.includes('build') || m.tags?.includes('deploy')) && (
+                                                    <Tooltip title="Build Client">
+                                                        <IconButton 
+                                                            size="small" 
+                                                            onClick={() => navigate(`/build-clients?machine=${m.id}`)}
+                                                            sx={{ 
+                                                                color: '#00bcd4',
+                                                                background: 'rgba(0, 188, 212, 0.1)',
+                                                                '&:hover': { background: 'rgba(0, 188, 212, 0.2)' }
+                                                            }}
+                                                        >
+                                                            <BuildIcon fontSize="small" />
                                                         </IconButton>
                                                     </Tooltip>
                                                 )}
