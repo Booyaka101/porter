@@ -54,6 +54,8 @@ const ScriptWizard = () => {
     const reconnectExecId = searchParams.get('execId')
     // Get step to skip directly to (e.g., step=3 for Review & Execute)
     const skipToStep = searchParams.get('step') ? parseInt(searchParams.get('step'), 10) - 1 : null
+    // Get pre-populated flags from URL (space-separated flags like "--client=solaire --version=1.0 --auto-install")
+    const prePopulatedFlags = searchParams.get('flags') || ''
     
     const [script, setScript] = useState(null)
     const [machines, setMachines] = useState([])
@@ -148,17 +150,41 @@ const ScriptWizard = () => {
                         value: ''
                     }
                 })
-                setFlagValues(initialFlags)
                 
-                // Load presets for this script
-                const presets = getPresetsForScript(found.path)
-                setScriptPresets(presets)
-                
-                // Auto-select recommended preset if available
-                const recommended = presets.presets?.find(p => p.recommended)
-                if (recommended) {
-                    setSelectedPreset(recommended)
-                    setFlagValues(presetToFlagValues(recommended, found.flags))
+                // If pre-populated flags are provided, parse and apply them
+                if (prePopulatedFlags) {
+                    const flagParts = prePopulatedFlags.split(' ').filter(Boolean)
+                    flagParts.forEach(part => {
+                        // Handle --flag=value or --flag formats
+                        const match = part.match(/^--([^=]+)(?:=(.*))?$/)
+                        if (match) {
+                            const [, flagName, flagValue] = match
+                            // Find matching flag in script
+                            const scriptFlag = found.flags?.find(f => 
+                                f.long === `--${flagName}` || f.long === flagName
+                            )
+                            if (scriptFlag) {
+                                initialFlags[scriptFlag.long] = {
+                                    enabled: true,
+                                    value: flagValue || ''
+                                }
+                            }
+                        }
+                    })
+                    setFlagValues(initialFlags)
+                } else {
+                    setFlagValues(initialFlags)
+                    
+                    // Load presets for this script
+                    const presets = getPresetsForScript(found.path)
+                    setScriptPresets(presets)
+                    
+                    // Auto-select recommended preset if available
+                    const recommended = presets.presets?.find(p => p.recommended)
+                    if (recommended) {
+                        setSelectedPreset(recommended)
+                        setFlagValues(presetToFlagValues(recommended, found.flags))
+                    }
                 }
             }
         } catch (err) {

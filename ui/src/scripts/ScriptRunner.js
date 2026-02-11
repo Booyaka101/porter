@@ -84,6 +84,7 @@ const ImportExport = lazy(() => import('./ImportExport'))
 const MachineComparison = lazy(() => import('./MachineComparison'))
 const ApiDocs = lazy(() => import('./ApiDocs'))
 const Webhooks = lazy(() => import('./Webhooks'))
+const BuildClients = lazy(() => import('./BuildClients'))
 
 // Loading fallback component
 const LoadingFallback = () => (
@@ -740,6 +741,7 @@ const ScriptRunner = () => {
                             <Route path="/compare" element={<MachineComparison />} />
                             <Route path="/api-docs" element={<ApiDocs />} />
                             <Route path="/webhooks" element={<Webhooks />} />
+                            <Route path="/build-clients" element={<BuildClients />} />
                             <Route path="*" element={<Dashboard />} />
                         </Routes>
                     </Suspense>
