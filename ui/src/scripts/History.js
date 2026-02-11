@@ -62,6 +62,8 @@ const History = () => {
     const [viewMode, setViewMode] = useState('list') // 'list' or 'timeline'
     const [selectedIds, setSelectedIds] = useState([])
     const [compareDialog, setCompareDialog] = useState({ open: false, executions: [] })
+    const [loadedDetails, setLoadedDetails] = useState({}) // Cache for lazy-loaded execution details
+    const [loadingDetail, setLoadingDetail] = useState(null) // ID of currently loading detail
 
     const loadHistory = useCallback(async () => {
         setLoading(true)
@@ -74,11 +76,29 @@ const History = () => {
             const statsData = await statsRes.json()
             setExecutions(historyData || [])
             setStats(statsData)
+            setLoadedDetails({}) // Clear cached details on refresh
         } catch (err) {
             console.error('Failed to load history:', err)
         }
         setLoading(false)
     }, [])
+
+    // Lazy load execution details (including output) when expanding
+    const loadExecutionDetail = useCallback(async (id) => {
+        if (loadedDetails[id]) return // Already loaded
+        
+        setLoadingDetail(id)
+        try {
+            const res = await fetch(`/api/history/${id}`)
+            if (res.ok) {
+                const detail = await res.json()
+                setLoadedDetails(prev => ({ ...prev, [id]: detail }))
+            }
+        } catch (err) {
+            console.error('Failed to load execution detail:', err)
+        }
+        setLoadingDetail(null)
+    }, [loadedDetails])
 
     const handleRerun = (execution) => {
         setRerunConfirm(execution)
@@ -625,7 +645,11 @@ const History = () => {
                                     )}
                                     <IconButton 
                                         size="small" 
-                                        onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                                        onClick={() => {
+                                            const newExpandedId = expandedId === r.id ? null : r.id
+                                            setExpandedId(newExpandedId)
+                                            if (newExpandedId) loadExecutionDetail(r.id)
+                                        }}
                                         sx={{ color: colors.text.secondary }}
                                     >
                                         {expandedId === r.id ? <ExpandLessIcon /> : <ExpandMoreIcon />}
@@ -635,43 +659,58 @@ const History = () => {
                         </CardContent>
                         <Collapse in={expandedId === r.id}>
                             <CardContent sx={{ pt: 0 }}>
-                                {r.error && (
-                                    <Box sx={{ 
-                                        background: 'rgba(255, 68, 102, 0.1)', 
-                                        borderRadius: '8px', 
-                                        p: 2, 
-                                        mb: 2 
-                                    }}>
-                                        <Typography sx={{ color: colors.error, fontWeight: 600, fontSize: '0.85rem', mb: 0.5 }}>
-                                            Error
-                                        </Typography>
-                                        <Typography sx={{ color: colors.text.secondary, fontSize: '0.85rem' }}>
-                                            {r.error}
+                                {loadingDetail === r.id ? (
+                                    <Box sx={{ py: 2 }}>
+                                        <LinearProgress sx={{ borderRadius: 1 }} />
+                                        <Typography sx={{ color: colors.text.muted, fontSize: '0.85rem', mt: 1, textAlign: 'center' }}>
+                                            Loading output...
                                         </Typography>
                                     </Box>
-                                )}
-                                {r.output && (
-                                    <Box sx={{ 
-                                        background: 'rgba(0,0,0,0.3)', 
-                                        borderRadius: '8px', 
-                                        p: 2,
-                                        maxHeight: 300,
-                                        overflow: 'auto'
-                                    }}>
-                                        <Typography sx={{ color: colors.text.muted, fontWeight: 600, fontSize: '0.85rem', mb: 1 }}>
-                                            Output
-                                        </Typography>
-                                        <pre style={{ 
-                                            margin: 0, 
-                                            color: colors.text.secondary, 
-                                            fontSize: '0.8rem',
-                                            fontFamily: '"JetBrains Mono", monospace',
-                                            whiteSpace: 'pre-wrap',
-                                            wordBreak: 'break-word'
-                                        }}>
-                                            {r.output}
-                                        </pre>
-                                    </Box>
+                                ) : (
+                                    <>
+                                        {(loadedDetails[r.id]?.error || r.error) && (
+                                            <Box sx={{ 
+                                                background: 'rgba(255, 68, 102, 0.1)', 
+                                                borderRadius: '8px', 
+                                                p: 2, 
+                                                mb: 2 
+                                            }}>
+                                                <Typography sx={{ color: colors.error, fontWeight: 600, fontSize: '0.85rem', mb: 0.5 }}>
+                                                    Error
+                                                </Typography>
+                                                <Typography sx={{ color: colors.text.secondary, fontSize: '0.85rem' }}>
+                                                    {loadedDetails[r.id]?.error || r.error}
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                        {loadedDetails[r.id]?.output ? (
+                                            <Box sx={{ 
+                                                background: 'rgba(0,0,0,0.3)', 
+                                                borderRadius: '8px', 
+                                                p: 2,
+                                                maxHeight: 300,
+                                                overflow: 'auto'
+                                            }}>
+                                                <Typography sx={{ color: colors.text.muted, fontWeight: 600, fontSize: '0.85rem', mb: 1 }}>
+                                                    Output
+                                                </Typography>
+                                                <pre style={{ 
+                                                    margin: 0, 
+                                                    color: colors.text.secondary, 
+                                                    fontSize: '0.8rem',
+                                                    fontFamily: '"JetBrains Mono", monospace',
+                                                    whiteSpace: 'pre-wrap',
+                                                    wordBreak: 'break-word'
+                                                }}>
+                                                    {loadedDetails[r.id].output}
+                                                </pre>
+                                            </Box>
+                                        ) : !loadedDetails[r.id] ? null : (
+                                            <Typography sx={{ color: colors.text.muted, fontSize: '0.85rem', fontStyle: 'italic' }}>
+                                                No output recorded
+                                            </Typography>
+                                        )}
+                                    </>
                                 )}
                             </CardContent>
                         </Collapse>

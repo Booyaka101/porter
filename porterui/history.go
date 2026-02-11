@@ -34,6 +34,46 @@ type ExecutionRecord struct {
 	Operator    string    `json:"operator,omitempty"`
 }
 
+// ExecutionRecordSummary is a lightweight version without Output for list views
+type ExecutionRecordSummary struct {
+	ID          string    `json:"id"`
+	MachineID   string    `json:"machine_id"`
+	MachineName string    `json:"machine_name"`
+	MachineIP   string    `json:"machine_ip"`
+	ScriptPath  string    `json:"script_path"`
+	ScriptName  string    `json:"script_name"`
+	Args        string    `json:"args"`
+	PresetName  string    `json:"preset_name,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
+	FinishedAt  time.Time `json:"finished_at"`
+	Duration    string    `json:"duration"`
+	Success     bool      `json:"success"`
+	Error       string    `json:"error,omitempty"`
+	ExitCode    int       `json:"exit_code"`
+	Operator    string    `json:"operator,omitempty"`
+}
+
+// ToSummary converts an ExecutionRecord to ExecutionRecordSummary
+func (r *ExecutionRecord) ToSummary() ExecutionRecordSummary {
+	return ExecutionRecordSummary{
+		ID:          r.ID,
+		MachineID:   r.MachineID,
+		MachineName: r.MachineName,
+		MachineIP:   r.MachineIP,
+		ScriptPath:  r.ScriptPath,
+		ScriptName:  r.ScriptName,
+		Args:        r.Args,
+		PresetName:  r.PresetName,
+		StartedAt:   r.StartedAt,
+		FinishedAt:  r.FinishedAt,
+		Duration:    r.Duration,
+		Success:     r.Success,
+		Error:       r.Error,
+		ExitCode:    r.ExitCode,
+		Operator:    r.Operator,
+	}
+}
+
 // HistoryStore manages persistent execution history
 type HistoryStore struct {
 	mu       sync.RWMutex
@@ -357,7 +397,7 @@ func (h *HistoryStore) Clear() error {
 
 // HistoryRoutes sets up history API routes
 func HistoryRoutes(r *mux.Router) {
-	// Get all history
+	// Get all history (returns summaries without Output for performance)
 	r.HandleFunc("/api/history", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -378,7 +418,13 @@ func HistoryRoutes(r *mux.Router) {
 			records = historyStore.GetRecent(limit)
 		}
 
-		json.NewEncoder(w).Encode(records)
+		// Convert to summaries (without Output) for better performance
+		summaries := make([]ExecutionRecordSummary, len(records))
+		for i, r := range records {
+			summaries[i] = r.ToSummary()
+		}
+
+		json.NewEncoder(w).Encode(summaries)
 	}).Methods("GET")
 
 	// Get history stats
