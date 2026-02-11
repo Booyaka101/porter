@@ -280,6 +280,19 @@ func (d *Database) migrateSQLite() error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_log(resource_type, resource_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at)`,
 
+		// Build clients table
+		`CREATE TABLE IF NOT EXISTS build_clients (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			customer TEXT NOT NULL,
+			pack TEXT,
+			branch TEXT NOT NULL,
+			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_build_clients_name ON build_clients(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_build_clients_customer ON build_clients(customer)`,
+
 		// Insert default roles
 		`INSERT OR IGNORE INTO roles (id, name, description, permissions, is_system) VALUES
 			('role-admin', 'admin', 'Full system access with root privileges', '["*", "sudo:enabled"]', 1),

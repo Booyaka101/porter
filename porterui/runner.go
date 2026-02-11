@@ -241,6 +241,13 @@ func Run(config RunConfig) {
 
 	StartHealthPoller()
 
+	if err := InitBookmarkStore(); err != nil {
+		log.Printf("Warning: bookmark store init failed: %v", err)
+	}
+	if err := InitBuildClientStore(); err != nil {
+		log.Printf("Warning: build client store init failed: %v", err)
+	}
+
 	// Server
 	server := &ooo.Server{
 		Router:  mux.NewRouter(),
