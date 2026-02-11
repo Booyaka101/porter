@@ -915,11 +915,15 @@ func MachinesRoutes(router *mux.Router) {
 			return
 		}
 
-		// Get machine IDs from the execution to send stop signal
-		for _, result := range execution.Results {
-			if machine, ok := machineRepo.Get(result.MachineID); ok {
+		// Get machine IDs from the execution to send stop signal and clear cache
+		// Use MachineIDs from execution (available immediately) rather than Results (populated later)
+		for _, machineID := range execution.MachineIDs {
+			if machine, ok := machineRepo.Get(machineID); ok {
 				// Create stop file on the remote machine (use sudo for system operations)
 				go runCommandOnMachine(machine, "touch /tmp/.build_stop", true)
+				// Clear build cache (preserve LFS) so next build starts fresh
+				// Cache dirs: /root/go/.build_cache, /root/go/.gomodcache, /root/go/.gobuildcache, /tmp/bundle
+				go runCommandOnMachine(machine, "rm -rf /root/go/.build_cache /root/go/.gomodcache /root/go/.gobuildcache /tmp/bundle", true)
 			}
 		}
 
@@ -929,7 +933,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
-			"message": "Cancellation signal sent",
+			"message": "Cancellation signal sent, cache cleared for fresh rebuild",
 		})
 	}).Methods("POST")
 
