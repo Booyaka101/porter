@@ -149,9 +149,11 @@ const BuildClients = () => {
         if (!selectedClient || !selectedMachine || !buildVersion) return
         
         // Build the URL with all flags pre-populated
-        // Flags: --client, --version, --auto-install
+        // Flags: --customer, --pack, --branch (if set), --version, --auto-install
         const flags = [
-            `--client=${selectedClient.name.toLowerCase()}`,
+            `--customer=${selectedClient.customer}`,
+            `--pack=${selectedClient.pack}`,
+            ...(selectedClient.branch ? [`--branch=${selectedClient.branch}`] : []),
             `--version=${buildVersion}`,
             '--auto-install'
         ]
@@ -573,7 +575,9 @@ const BuildClients = () => {
                             fontSize: '0.9rem',
                             lineHeight: 1.8
                         }}>
-                            <span style={{ color: colors.text.muted }}>$</span> --client=<span style={{ color: colors.primary }}>{selectedClient?.name.toLowerCase()}</span><br/>
+                            <span style={{ color: colors.text.muted }}>$</span> --customer=<span style={{ color: colors.primary }}>{selectedClient?.customer}</span><br/>
+                            <span style={{ color: colors.text.muted }}>$</span> --pack=<span style={{ color: colors.primary }}>{selectedClient?.pack}</span><br/>
+                            {selectedClient?.branch && <><span style={{ color: colors.text.muted }}>$</span> --branch=<span style={{ color: colors.primary }}>{selectedClient?.branch}</span><br/></>}
                             <span style={{ color: colors.text.muted }}>$</span> --version=<span style={{ color: colors.primary }}>{buildVersion || '<version>'}</span><br/>
                             <span style={{ color: colors.text.muted }}>$</span> --auto-install
                         </Typography>
