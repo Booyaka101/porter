@@ -24,7 +24,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import BuildIcon from '@mui/icons-material/Build'
 import ComputerIcon from '@mui/icons-material/Computer'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import { colors } from './theme'
+import { colors, gradients, shadows, cardStyles, headerStyles, buttonStyles, inputStyles } from './theme'
 
 const BuildClients = () => {
     const navigate = useNavigate()
@@ -179,22 +179,35 @@ const BuildClients = () => {
     }
 
     return (
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: 3, minHeight: '100vh' }}>
             {/* Header */}
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+            <Box sx={{ 
+                ...headerStyles.container,
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 2
+            }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <IconButton onClick={() => navigate('/machines')} sx={{ color: colors.text.muted }}>
+                    <IconButton 
+                        onClick={() => navigate('/machines')} 
+                        sx={{ 
+                            color: colors.text.muted,
+                            background: 'rgba(255,255,255,0.05)',
+                            '&:hover': { background: 'rgba(249, 115, 22, 0.1)', color: colors.primary }
+                        }}
+                    >
                         <ArrowBackIcon />
                     </IconButton>
                     <Box>
-                        <Typography variant="h4" sx={{ color: colors.text.primary, display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <BuildIcon sx={{ color: colors.primary }} />
+                        <Typography sx={headerStyles.title}>
                             Build Clients
                         </Typography>
                         {preselectedMachineId && (
                             <Typography sx={{ color: colors.text.muted, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <ComputerIcon sx={{ fontSize: 16 }} />
-                                Building on: <strong>{getSelectedMachineName()}</strong>
+                                <ComputerIcon sx={{ fontSize: 16, color: colors.primary }} />
+                                Building on: <strong style={{ color: colors.primary }}>{getSelectedMachineName()}</strong>
                             </Typography>
                         )}
                     </Box>
@@ -203,7 +216,7 @@ const BuildClients = () => {
                     variant="contained"
                     startIcon={<AddIcon />}
                     onClick={() => handleOpenDialog()}
-                    sx={{ bgcolor: colors.primary, '&:hover': { bgcolor: colors.primaryDark } }}
+                    sx={buttonStyles.primary}
                 >
                     Add Client
                 </Button>
@@ -222,25 +235,25 @@ const BuildClients = () => {
             )}
 
             {/* Client Cards */}
-            <Grid container spacing={2}>
+            <Grid container spacing={3}>
                 {clients.length === 0 ? (
                     <Grid item xs={12}>
                         <Box sx={{ 
                             textAlign: 'center', 
-                            py: 6, 
+                            py: 8, 
                             color: colors.text.muted,
-                            bgcolor: 'rgba(255,255,255,0.02)',
-                            borderRadius: 2,
-                            border: '1px dashed rgba(255,255,255,0.1)'
+                            background: colors.background.card,
+                            borderRadius: '20px',
+                            border: `1px dashed ${colors.border.medium}`,
                         }}>
-                            <BuildIcon sx={{ fontSize: 48, mb: 2, opacity: 0.5 }} />
-                            <Typography variant="h6">No clients configured</Typography>
-                            <Typography sx={{ mb: 2 }}>Add a client to start building</Typography>
+                            <BuildIcon sx={{ fontSize: 64, mb: 2, opacity: 0.3, color: colors.primary }} />
+                            <Typography variant="h5" sx={{ color: colors.text.primary, mb: 1 }}>No clients configured</Typography>
+                            <Typography sx={{ mb: 3, color: colors.text.muted }}>Add a client to start building</Typography>
                             <Button
-                                variant="outlined"
+                                variant="contained"
                                 startIcon={<AddIcon />}
                                 onClick={() => handleOpenDialog()}
-                                sx={{ color: colors.primary, borderColor: colors.primary }}
+                                sx={buttonStyles.primary}
                             >
                                 Add First Client
                             </Button>
@@ -250,44 +263,84 @@ const BuildClients = () => {
                     clients.map(client => (
                         <Grid item xs={12} sm={6} md={4} key={client.id}>
                             <Card sx={{ 
-                                bgcolor: 'rgba(255,255,255,0.03)', 
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: 2,
-                                transition: 'all 0.2s',
-                                '&:hover': { 
-                                    borderColor: colors.primary,
-                                    transform: 'translateY(-2px)'
-                                }
+                                ...cardStyles.base,
+                                '&:hover': cardStyles.hover
                             }}>
-                                <CardContent>
-                                    <Typography variant="h6" sx={{ color: colors.text.primary, mb: 1 }}>
-                                        {client.name}
-                                    </Typography>
-                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+                                <CardContent sx={{ p: 3 }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+                                        <Box sx={{
+                                            width: 44,
+                                            height: 44,
+                                            borderRadius: '12px',
+                                            background: gradients.primarySubtle,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}>
+                                            <BuildIcon sx={{ color: colors.primary, fontSize: 22 }} />
+                                        </Box>
+                                        <Typography variant="h6" sx={{ 
+                                            color: colors.text.primary, 
+                                            fontWeight: 700,
+                                            fontSize: '1.1rem'
+                                        }}>
+                                            {client.name}
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 2 }}>
                                         <Chip 
                                             size="small" 
                                             label={`Customer: ${client.customer}`}
-                                            sx={{ bgcolor: 'rgba(249, 115, 22, 0.1)', color: colors.primary }}
+                                            sx={{ 
+                                                bgcolor: 'rgba(249, 115, 22, 0.1)', 
+                                                color: colors.primary,
+                                                border: `1px solid ${colors.border.accent}`,
+                                                fontWeight: 500
+                                            }}
                                         />
                                         <Chip 
                                             size="small" 
                                             label={`Pack: ${client.pack}`}
-                                            sx={{ bgcolor: 'rgba(34, 197, 94, 0.1)', color: '#22c55e' }}
+                                            sx={{ 
+                                                bgcolor: 'rgba(34, 197, 94, 0.1)', 
+                                                color: colors.secondary,
+                                                border: `1px solid ${colors.border.success}`,
+                                                fontWeight: 500
+                                            }}
                                         />
                                     </Box>
                                     {client.branch && (
-                                        <Typography sx={{ color: colors.text.muted, fontSize: '0.85rem' }}>
-                                            Branch: {client.branch}
+                                        <Typography sx={{ 
+                                            color: colors.text.muted, 
+                                            fontSize: '0.85rem',
+                                            fontFamily: 'monospace',
+                                            background: 'rgba(0,0,0,0.2)',
+                                            px: 1.5,
+                                            py: 0.5,
+                                            borderRadius: '6px',
+                                            display: 'inline-block'
+                                        }}>
+                                            🌿 {client.branch}
                                         </Typography>
                                     )}
                                 </CardContent>
-                                <CardActions sx={{ justifyContent: 'space-between', px: 2, pb: 2 }}>
-                                    <Box>
+                                <CardActions sx={{ 
+                                    justifyContent: 'space-between', 
+                                    px: 3, 
+                                    pb: 3,
+                                    pt: 0,
+                                    borderTop: `1px solid ${colors.border.light}`,
+                                    mt: 0
+                                }}>
+                                    <Box sx={{ display: 'flex', gap: 0.5, pt: 2 }}>
                                         <Tooltip title="Edit">
                                             <IconButton 
                                                 size="small" 
                                                 onClick={() => handleOpenDialog(client)}
-                                                sx={{ color: colors.text.muted }}
+                                                sx={{ 
+                                                    color: colors.text.muted,
+                                                    '&:hover': { color: colors.primary, background: 'rgba(249, 115, 22, 0.1)' }
+                                                }}
                                             >
                                                 <EditIcon fontSize="small" />
                                             </IconButton>
@@ -296,7 +349,10 @@ const BuildClients = () => {
                                             <IconButton 
                                                 size="small" 
                                                 onClick={() => handleDelete(client.id)}
-                                                sx={{ color: '#ff4466' }}
+                                                sx={{ 
+                                                    color: colors.text.muted,
+                                                    '&:hover': { color: colors.error, background: 'rgba(239, 68, 68, 0.1)' }
+                                                }}
                                             >
                                                 <DeleteIcon fontSize="small" />
                                             </IconButton>
@@ -304,14 +360,25 @@ const BuildClients = () => {
                                     </Box>
                                     <Button
                                         variant="contained"
-                                        size="small"
+                                        size="medium"
                                         startIcon={<PlayArrowIcon />}
                                         onClick={() => handleOpenBuildDialog(client)}
                                         disabled={machines.length === 0}
                                         sx={{ 
-                                            bgcolor: '#22c55e', 
-                                            '&:hover': { bgcolor: '#16a34a' },
-                                            '&:disabled': { bgcolor: 'rgba(255,255,255,0.1)' }
+                                            mt: 2,
+                                            background: gradients.secondary,
+                                            fontWeight: 600,
+                                            px: 2.5,
+                                            borderRadius: '10px',
+                                            boxShadow: shadows.glowSuccess,
+                                            '&:hover': { 
+                                                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                                                boxShadow: '0 8px 30px rgba(34, 197, 94, 0.5)'
+                                            },
+                                            '&:disabled': { 
+                                                background: 'rgba(255,255,255,0.05)',
+                                                boxShadow: 'none'
+                                            }
                                         }}
                                     >
                                         Build
@@ -331,22 +398,29 @@ const BuildClients = () => {
                 fullWidth
                 PaperProps={{
                     sx: {
-                        bgcolor: '#1a1a2e',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: 2
+                        background: colors.background.elevated,
+                        border: `1px solid ${colors.border.medium}`,
+                        borderRadius: '20px',
+                        boxShadow: shadows.cardElevated
                     }
                 }}
             >
-                <DialogTitle sx={{ color: colors.text.primary }}>
+                <DialogTitle sx={{ 
+                    color: colors.text.primary, 
+                    fontWeight: 700,
+                    fontSize: '1.3rem',
+                    borderBottom: `1px solid ${colors.border.light}`,
+                    pb: 2
+                }}>
                     {editingClient ? 'Edit Client' : 'Add Client'}
                 </DialogTitle>
-                <DialogContent>
+                <DialogContent sx={{ pt: 3 }}>
                     <TextField
                         fullWidth
                         label="Client Name"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        sx={{ mt: 2, mb: 2 }}
+                        sx={{ mt: 1, mb: 2.5, ...inputStyles.search }}
                         placeholder="e.g., solaire, inspire, idx"
                     />
                     <TextField
@@ -354,7 +428,7 @@ const BuildClients = () => {
                         label="Customer"
                         value={formData.customer}
                         onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 2.5, ...inputStyles.search }}
                         placeholder="Customer name for build output"
                     />
                     <TextField
@@ -362,7 +436,7 @@ const BuildClients = () => {
                         label="Pack"
                         value={formData.pack}
                         onChange={(e) => setFormData({ ...formData, pack: e.target.value })}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 2.5, ...inputStyles.search }}
                         placeholder="Pack name (usually same as customer)"
                     />
                     <TextField
@@ -370,20 +444,25 @@ const BuildClients = () => {
                         label="Branch"
                         value={formData.branch}
                         onChange={(e) => setFormData({ ...formData, branch: e.target.value })}
+                        sx={inputStyles.search}
                         placeholder="Git branch (default: master)"
                     />
                 </DialogContent>
-                <DialogActions sx={{ px: 3, pb: 2 }}>
-                    <Button onClick={() => setDialogOpen(false)} sx={{ color: colors.text.muted }}>
+                <DialogActions sx={{ px: 3, pb: 3, pt: 2, borderTop: `1px solid ${colors.border.light}` }}>
+                    <Button 
+                        onClick={() => setDialogOpen(false)} 
+                        sx={{ ...buttonStyles.secondary, px: 3 }}
+                        variant="outlined"
+                    >
                         Cancel
                     </Button>
                     <Button 
                         onClick={handleSave}
                         variant="contained"
                         disabled={!formData.name || !formData.customer || !formData.pack}
-                        sx={{ bgcolor: colors.primary }}
+                        sx={buttonStyles.primary}
                     >
-                        Save
+                        Save Client
                     </Button>
                 </DialogActions>
             </Dialog>
@@ -396,33 +475,73 @@ const BuildClients = () => {
                 fullWidth
                 PaperProps={{
                     sx: {
-                        bgcolor: '#1a1a2e',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: 2
+                        background: colors.background.elevated,
+                        border: `1px solid ${colors.border.medium}`,
+                        borderRadius: '20px',
+                        boxShadow: shadows.cardElevated
                     }
                 }}
             >
-                <DialogTitle sx={{ color: colors.text.primary }}>
+                <DialogTitle sx={{ 
+                    color: colors.text.primary, 
+                    fontWeight: 700,
+                    fontSize: '1.3rem',
+                    borderBottom: `1px solid ${colors.border.light}`,
+                    pb: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5
+                }}>
+                    <Box sx={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: '10px',
+                        background: gradients.secondary,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                    }}>
+                        <PlayArrowIcon sx={{ color: '#fff', fontSize: 22 }} />
+                    </Box>
                     Build {selectedClient?.name}
                 </DialogTitle>
-                <DialogContent>
-                    <Alert severity="info" sx={{ mb: 2 }}>
-                        This will run <code>buildBundle.sh</code> with <code>--auto-install</code> enabled.
+                <DialogContent sx={{ pt: 3 }}>
+                    <Alert 
+                        severity="info" 
+                        sx={{ 
+                            mb: 3, 
+                            borderRadius: '12px',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            border: '1px solid rgba(59, 130, 246, 0.3)',
+                            '& .MuiAlert-icon': { color: colors.info }
+                        }}
+                    >
+                        This will run <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>buildBundle.sh</code> with <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>--auto-install</code> enabled.
                     </Alert>
                     
-                    <Typography sx={{ color: colors.text.muted, mb: 1, fontSize: '0.85rem' }}>
+                    <Typography sx={{ color: colors.text.secondary, mb: 1, fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                         Build Machine
                     </Typography>
                     <Box sx={{ 
                         p: 2, 
-                        mb: 2, 
-                        bgcolor: 'rgba(0,0,0,0.2)', 
-                        borderRadius: 1,
-                        border: '1px solid rgba(255,255,255,0.1)'
+                        mb: 3, 
+                        background: colors.background.card, 
+                        borderRadius: '12px',
+                        border: `1px solid ${colors.border.light}`
                     }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <ComputerIcon sx={{ color: colors.primary }} />
-                            <Typography sx={{ color: colors.text.primary }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                            <Box sx={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: '8px',
+                                background: gradients.primarySubtle,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }}>
+                                <ComputerIcon sx={{ color: colors.primary, fontSize: 20 }} />
+                            </Box>
+                            <Typography sx={{ color: colors.text.primary, fontWeight: 600 }}>
                                 {getSelectedMachineName()}
                             </Typography>
                         </Box>
@@ -436,27 +555,36 @@ const BuildClients = () => {
                         placeholder="e.g., 1.2.3"
                         required
                         helperText="Version tag for this build (required)"
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 3, ...inputStyles.search }}
                     />
 
-                    <Typography sx={{ color: colors.text.muted, mb: 1, fontSize: '0.85rem' }}>
+                    <Typography sx={{ color: colors.text.secondary, mb: 1, fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                         Build Configuration
                     </Typography>
                     <Box sx={{ 
                         p: 2, 
-                        bgcolor: 'rgba(0,0,0,0.2)', 
-                        borderRadius: 1,
-                        border: '1px solid rgba(255,255,255,0.1)'
+                        background: 'rgba(0,0,0,0.3)', 
+                        borderRadius: '12px',
+                        border: `1px solid ${colors.border.light}`
                     }}>
-                        <Typography sx={{ color: colors.text.primary, fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                            --client={selectedClient?.name.toLowerCase()}<br/>
-                            --version={buildVersion || '<version>'}<br/>
-                            --auto-install
+                        <Typography sx={{ 
+                            color: colors.secondary, 
+                            fontFamily: 'monospace', 
+                            fontSize: '0.9rem',
+                            lineHeight: 1.8
+                        }}>
+                            <span style={{ color: colors.text.muted }}>$</span> --client=<span style={{ color: colors.primary }}>{selectedClient?.name.toLowerCase()}</span><br/>
+                            <span style={{ color: colors.text.muted }}>$</span> --version=<span style={{ color: colors.primary }}>{buildVersion || '<version>'}</span><br/>
+                            <span style={{ color: colors.text.muted }}>$</span> --auto-install
                         </Typography>
                     </Box>
                 </DialogContent>
-                <DialogActions sx={{ px: 3, pb: 2 }}>
-                    <Button onClick={() => setBuildDialogOpen(false)} sx={{ color: colors.text.muted }}>
+                <DialogActions sx={{ px: 3, pb: 3, pt: 2, borderTop: `1px solid ${colors.border.light}` }}>
+                    <Button 
+                        onClick={() => setBuildDialogOpen(false)} 
+                        sx={{ ...buttonStyles.secondary, px: 3 }}
+                        variant="outlined"
+                    >
                         Cancel
                     </Button>
                     <Button 
@@ -464,7 +592,21 @@ const BuildClients = () => {
                         variant="contained"
                         startIcon={<PlayArrowIcon />}
                         disabled={!buildVersion || !selectedMachine}
-                        sx={{ bgcolor: '#22c55e', '&:hover': { bgcolor: '#16a34a' } }}
+                        sx={{ 
+                            background: gradients.secondary,
+                            fontWeight: 700,
+                            px: 3,
+                            borderRadius: '12px',
+                            boxShadow: shadows.glowSuccess,
+                            '&:hover': { 
+                                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                                boxShadow: '0 8px 30px rgba(34, 197, 94, 0.5)'
+                            },
+                            '&:disabled': { 
+                                background: 'rgba(255,255,255,0.05)',
+                                boxShadow: 'none'
+                            }
+                        }}
                     >
                         Start Build
                     </Button>
