@@ -919,8 +919,9 @@ func MachinesRoutes(router *mux.Router) {
 		// Use MachineIDs from execution (available immediately) rather than Results (populated later)
 		for _, machineID := range execution.MachineIDs {
 			if machine, ok := machineRepo.Get(machineID); ok {
-				// Create stop file on the remote machine (use sudo for system operations)
-				go runCommandOnMachine(machine, "touch /tmp/.build_stop", true)
+				// Kill the buildBundle.sh process and all its children
+				// pkill -f matches the full command line, -P kills child processes
+				go runCommandOnMachine(machine, "pkill -9 -f buildBundle.sh; pkill -9 -f 'go build'; pkill -9 -f 'docker build'; touch /tmp/.build_stop", true)
 				// Clear build cache (preserve LFS) so next build starts fresh
 				// Cache dirs: /root/go/.build_cache, /root/go/.gomodcache, /root/go/.gobuildcache, /tmp/bundle
 				go runCommandOnMachine(machine, "rm -rf /root/go/.build_cache /root/go/.gomodcache /root/go/.gobuildcache /tmp/bundle", true)
