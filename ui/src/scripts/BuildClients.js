@@ -162,7 +162,7 @@ const BuildClients = () => {
         const flagsParam = encodeURIComponent(flags.join(' '))
         
         // Navigate to ScriptWizard step 3 with machine and flags pre-populated
-        navigate(`/scripts/build-deploy%2FbuildBundle.sh?machines=${selectedMachine}&step=3&flags=${flagsParam}`)
+        navigate(`/script-wizard/embedded-scripts%2Fbuild-deploy%2FbuildBundle.sh?machines=${selectedMachine}&step=3&flags=${flagsParam}`)
         
         setBuildDialogOpen(false)
     }
