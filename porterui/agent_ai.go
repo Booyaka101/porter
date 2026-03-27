@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -115,7 +116,41 @@ var (
 	liveContextCache     = make(map[string]string)
 	liveContextCacheLock sync.RWMutex
 	liveContextCacheTTL  = make(map[string]time.Time)
+	ipRegex              = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
 )
+
+// resolveMachinesFromMessage parses user message for IPs or machine names
+// and returns matching machines from the repo
+func resolveMachinesFromMessage(message string, allMachines []*Machine) []*Machine {
+	var resolved []*Machine
+	seen := make(map[string]bool)
+
+	// Extract IPs from message
+	ips := ipRegex.FindAllString(message, -1)
+	for _, ip := range ips {
+		for _, m := range allMachines {
+			if m.IP == ip && !seen[m.ID] {
+				resolved = append(resolved, m)
+				seen[m.ID] = true
+			}
+		}
+	}
+
+	// Match machine names (case-insensitive)
+	msgLower := strings.ToLower(message)
+	for _, m := range allMachines {
+		if seen[m.ID] {
+			continue
+		}
+		nameLower := strings.ToLower(m.Name)
+		if nameLower != "" && strings.Contains(msgLower, nameLower) {
+			resolved = append(resolved, m)
+			seen[m.ID] = true
+		}
+	}
+
+	return resolved
+}
 
 // gatherMachineContext SSHes into a machine and gathers live service info
 func gatherMachineContext(m *Machine) string {
@@ -129,8 +164,8 @@ func gatherMachineContext(m *Machine) string {
 	}
 	liveContextCacheLock.RUnlock()
 
-	// Gather: docker containers, key systemd services, running processes
-	cmd := `echo "DOCKER:"; docker ps --format '{{.Names}} ({{.Image}}, {{.Status}})' 2>/dev/null || echo "none"; echo "SERVICES:"; systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v 'snap\.\|dbus\|polkit\|rtkit\|fwupd\|avahi\|bluetooth\|cups\|colord\|kerneloops\|power-profiles\|accounts-daemon\|gnome\|gdm\|cron\|rsyslog\|networkd-dispatcher\|NetworkManager\|chrony\|udisks\|switcheroo\|upower\|wpa_supplicant\|thermald\|irqbalance\|whoopsie\|bolt\|apparmor\|multipathd\|systemd-\|user@\|unattended\|ModemManager\|packagekit\|secureboot\|ubuntu-advantage' | awk '{print $1}' | sed 's/\.service//' | head -15`
+	// Gather docker containers, system services, and user services
+	cmd := `echo "DOCKER_CONTAINERS:"; docker ps --format '{{.Names}} ({{.Image}}, {{.Status}})' 2>/dev/null || echo "none"; echo "SYSTEM_SERVICES:"; systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v 'snap\.\|dbus\|polkit\|rtkit\|fwupd\|avahi\|bluetooth\|cups\|colord\|kerneloops\|power-profiles\|accounts-daemon\|gnome\|gdm\|cron\|rsyslog\|networkd-dispatcher\|NetworkManager\|chrony\|udisks\|switcheroo\|upower\|wpa_supplicant\|thermald\|irqbalance\|whoopsie\|bolt\|apparmor\|multipathd\|systemd-\|user@\|unattended\|ModemManager\|packagekit\|secureboot\|ubuntu-advantage' | awk '{print $1}' | sed 's/\.service//' | head -20; echo "USER_SERVICES:"; systemctl --user list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | awk '{print $1}' | sed 's/\.service//' | head -10 || echo "none"`
 
 	result := runCommandOnMachine(m, cmd, false)
 	if !result.Success || result.Output == "" {
@@ -194,16 +229,16 @@ func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext m
 
 	sb.WriteString(`You are Porter AI, an infrastructure assistant. Be helpful and concise.
 
-RESPONSE FORMAT:
-- Always start with a brief explanation
-- When a command needs to run, include a JSON action block
-- Use the correct tool for the service type (see LIVE STATUS below)
+RESPONSE RULES:
+- Start with a brief explanation, then provide the action
+- Use the LIVE STATUS below to determine the correct command type
+- DOCKER_CONTAINERS: use "docker logs <name> --tail 100"
+- SYSTEM_SERVICES: use "journalctl -u <name> -n 100 --no-pager"  
+- USER_SERVICES: use "systemctl --user status <name>" or "journalctl --user -u <name> -n 100 --no-pager"
+- Health: "top -b -n 1 | head -15; free -h; df -h"
+- NEVER guess the service type - only use what LIVE STATUS shows
 
-For docker containers, use: docker logs <name> --tail 100
-For systemd services, use: journalctl -u <name> -n 100 --no-pager
-For health checks, use: top -b -n 1 | head -15; free -h; df -h
-
-ACTION FORMAT (include at end of response when needed):
+ACTION FORMAT (include at end when a command needs to run):
 `)
 	sb.WriteString("```json\n")
 	sb.WriteString(`{"type":"run_command","command":"your command","machine_ids":["machine-id"]}`)
@@ -591,7 +626,10 @@ func AIAgentRoutes(r *mux.Router) {
 		// Get machines for context
 		machines := machineRepo.List()
 
-		// Determine which machines to gather context for
+		// Determine which machines to gather context for:
+		// 1. Explicitly selected machines from UI
+		// 2. Machines mentioned by IP or name in the user's message
+		// 3. Fall back to all machines
 		var contextMachines []*Machine
 		if len(chatReq.MachineIDs) > 0 {
 			for _, id := range chatReq.MachineIDs {
@@ -599,11 +637,25 @@ func AIAgentRoutes(r *mux.Router) {
 					contextMachines = append(contextMachines, m)
 				}
 			}
-		} else {
+		}
+		// Also resolve machines mentioned in the user's message
+		mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
+		seen := make(map[string]bool)
+		for _, m := range contextMachines {
+			seen[m.ID] = true
+		}
+		for _, m := range mentioned {
+			if !seen[m.ID] {
+				contextMachines = append(contextMachines, m)
+				seen[m.ID] = true
+			}
+		}
+		// If no machines resolved, use all
+		if len(contextMachines) == 0 {
 			contextMachines = machines
 		}
 
-		// Gather live context from selected machines via SSH
+		// Gather live context from resolved machines via SSH
 		liveContext := gatherContextForMachines(contextMachines)
 
 		// Build conversation with system prompt
