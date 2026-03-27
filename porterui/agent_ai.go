@@ -229,14 +229,17 @@ func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext m
 
 	sb.WriteString(`You are Porter AI, an infrastructure assistant. Be concise.
 
-Always respond with a short explanation FIRST, then the JSON action block.
+Always: short explanation first, then JSON action block.
 
-CRITICAL: Check which section a service appears under in LIVE STATUS.
-If under DOCKER_CONTAINERS -> docker logs <name> --tail 100
-If under SYSTEM_SERVICES -> journalctl -u <name> -n 100 --no-pager
-If under USER_SERVICES -> journalctl --user -u <name> -n 100 --no-pager
-NEVER use "journalctl -u" for a USER_SERVICE. You MUST use "journalctl --user -u" instead.
+LOG COMMANDS (check LIVE STATUS to pick the right one):
+- DOCKER_CONTAINERS: docker logs <name> --tail 100
+- SYSTEM_SERVICES: journalctl -u <name> -n 100 --no-pager
+- USER_SERVICES: journalctl --user -u <name> -n 100 --no-pager
 
+JSON ACTION FORMAT (use this EXACT format, replace values only):
+` + "```" + `json
+{"type":"run_command","command":"YOUR_COMMAND","machine_ids":["MACHINE_ID"]}
+` + "```" + `
 `)
 
 	// Add scripts
@@ -526,8 +529,54 @@ func callOllama(config *AIAgentConfig, messages []ChatMessage) (string, int, err
 	return result.Message.Content, 0, nil
 }
 
+// normalizeAction tries to fix common LLM format deviations into a valid AgentAction
+func normalizeAction(raw map[string]interface{}, allMachines []*Machine) *AgentAction {
+	action := &AgentAction{}
+
+	// Extract type - default to run_command if command is present
+	if t, ok := raw["type"].(string); ok {
+		action.Type = t
+	} else if _, ok := raw["command"]; ok {
+		action.Type = "run_command"
+	}
+
+	// Extract command
+	if cmd, ok := raw["command"].(string); ok {
+		action.Command = cmd
+	}
+
+	// Extract machine_ids (correct format)
+	if ids, ok := raw["machine_ids"].([]interface{}); ok {
+		for _, id := range ids {
+			if s, ok := id.(string); ok {
+				action.MachineIDs = append(action.MachineIDs, s)
+			}
+		}
+	}
+
+	// Handle LLM using "machine_ip" instead of "machine_ids"
+	if ip, ok := raw["machine_ip"].(string); ok && len(action.MachineIDs) == 0 {
+		for _, m := range allMachines {
+			if m.IP == ip {
+				action.MachineIDs = append(action.MachineIDs, m.ID)
+				break
+			}
+		}
+	}
+
+	// Handle "machine_id" (singular) instead of "machine_ids"
+	if id, ok := raw["machine_id"].(string); ok && len(action.MachineIDs) == 0 {
+		action.MachineIDs = append(action.MachineIDs, id)
+	}
+
+	if action.Type != "" && action.Command != "" {
+		return action
+	}
+	return nil
+}
+
 // parseActions extracts action blocks from the AI response
-func parseActions(response string) []AgentAction {
+func parseActions(response string, allMachines []*Machine) []AgentAction {
 	var actions []AgentAction
 
 	// Find JSON blocks in the response
@@ -547,10 +596,17 @@ func parseActions(response string) []AgentAction {
 
 		jsonStr := strings.TrimSpace(response[jsonStart:jsonEnd])
 
+		// First try strict parsing
 		var action AgentAction
-		if err := json.Unmarshal([]byte(jsonStr), &action); err == nil {
-			if action.Type != "" {
-				actions = append(actions, action)
+		if err := json.Unmarshal([]byte(jsonStr), &action); err == nil && action.Type != "" && len(action.MachineIDs) > 0 {
+			actions = append(actions, action)
+		} else {
+			// Fallback: parse as generic map and normalize
+			var raw map[string]interface{}
+			if err := json.Unmarshal([]byte(jsonStr), &raw); err == nil {
+				if normalized := normalizeAction(raw, allMachines); normalized != nil {
+					actions = append(actions, *normalized)
+				}
 			}
 		}
 
@@ -694,7 +750,7 @@ func AIAgentRoutes(r *mux.Router) {
 		}
 
 		// Parse actions from response
-		actions := parseActions(response)
+		actions := parseActions(response, machines)
 
 		// Store in session
 		assistantMessage := ChatMessage{
