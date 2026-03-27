@@ -110,26 +110,106 @@ func GetAIAgentConfig() *AIAgentConfig {
 	return aiAgentConfig
 }
 
-// buildSystemPrompt creates a context-aware system prompt
-func buildSystemPrompt(config *AIAgentConfig, machines []*Machine) string {
+// liveContextCache stores gathered machine context with TTL
+var (
+	liveContextCache     = make(map[string]string)
+	liveContextCacheLock sync.RWMutex
+	liveContextCacheTTL  = make(map[string]time.Time)
+)
+
+// gatherMachineContext SSHes into a machine and gathers live service info
+func gatherMachineContext(m *Machine) string {
+	// Check cache (60s TTL)
+	liveContextCacheLock.RLock()
+	if cached, ok := liveContextCache[m.ID]; ok {
+		if time.Since(liveContextCacheTTL[m.ID]) < 60*time.Second {
+			liveContextCacheLock.RUnlock()
+			return cached
+		}
+	}
+	liveContextCacheLock.RUnlock()
+
+	// Gather: docker containers, key systemd services, running processes
+	cmd := `echo "DOCKER:"; docker ps --format '{{.Names}} ({{.Image}}, {{.Status}})' 2>/dev/null || echo "none"; echo "SERVICES:"; systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v 'snap\.\|dbus\|polkit\|rtkit\|fwupd\|avahi\|bluetooth\|cups\|colord\|kerneloops\|power-profiles\|accounts-daemon\|gnome\|gdm\|cron\|rsyslog\|networkd-dispatcher\|NetworkManager\|chrony\|udisks\|switcheroo\|upower\|wpa_supplicant\|thermald\|irqbalance\|whoopsie\|bolt\|apparmor\|multipathd\|systemd-\|user@\|unattended\|ModemManager\|packagekit\|secureboot\|ubuntu-advantage' | awk '{print $1}' | sed 's/\.service//' | head -15`
+
+	result := runCommandOnMachine(m, cmd, false)
+	if !result.Success || result.Output == "" {
+		return ""
+	}
+
+	// Clean up output - remove EXIT_CODE line
+	output := result.Output
+	if idx := strings.LastIndex(output, "EXIT_CODE:"); idx != -1 {
+		output = strings.TrimSpace(output[:idx])
+	}
+
+	// Cache it
+	liveContextCacheLock.Lock()
+	liveContextCache[m.ID] = output
+	liveContextCacheTTL[m.ID] = time.Now()
+	liveContextCacheLock.Unlock()
+
+	return output
+}
+
+// gatherContextForMachines gathers context for multiple machines concurrently
+func gatherContextForMachines(machines []*Machine) map[string]string {
+	results := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, m := range machines {
+		if m.Status != "online" && m.Status != "" {
+			continue
+		}
+		wg.Add(1)
+		go func(machine *Machine) {
+			defer wg.Done()
+			ctx := gatherMachineContext(machine)
+			if ctx != "" {
+				mu.Lock()
+				results[machine.ID] = ctx
+				mu.Unlock()
+			}
+		}(m)
+	}
+
+	// Wait with timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+	}
+
+	return results
+}
+
+// buildSystemPrompt creates a context-aware system prompt with live machine data
+func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string) string {
 	var sb strings.Builder
 
 	sb.WriteString(`You are Porter AI, an infrastructure assistant. Be helpful and concise.
 
 RESPONSE FORMAT:
-- Always include a brief explanation of what you're doing
-- When a command needs to run, include the JSON action block at the end
-- Example: "I'll fetch the trendboard logs for you.\n\n` + "```" + `json\n{\"type\":\"run_command\",\"command\":\"docker logs trendboard --tail 100\",\"machine_ids\":[\"machine-id\"]}\n` + "```" + `"
+- Always start with a brief explanation
+- When a command needs to run, include a JSON action block
+- Use the correct tool for the service type (see LIVE STATUS below)
 
-RULES:
-- Use simple, specific commands
-- For logs: docker logs <container> --tail 100
-- For health: top -b -n 1 | head -15; free -h; df -h
-- Match machine by IP or name from INFRASTRUCTURE below
+For docker containers, use: docker logs <name> --tail 100
+For systemd services, use: journalctl -u <name> -n 100 --no-pager
+For health checks, use: top -b -n 1 | head -15; free -h; df -h
 
+ACTION FORMAT (include at end of response when needed):
 `)
+	sb.WriteString("```json\n")
+	sb.WriteString(`{"type":"run_command","command":"your command","machine_ids":["machine-id"]}`)
+	sb.WriteString("\n```\n\n")
 
-	// Add scripts briefly
+	// Add scripts
 	if len(config.ScriptDescriptions) > 0 {
 		sb.WriteString("SCRIPTS: ")
 		names := make([]string, 0, len(config.ScriptDescriptions))
@@ -140,23 +220,27 @@ RULES:
 		sb.WriteString("\n\n")
 	}
 
-	// Add machine context
+	// Add machines with live context
 	if len(machines) > 0 {
-		sb.WriteString("INFRASTRUCTURE:\n")
+		sb.WriteString("MACHINES AND LIVE STATUS:\n")
 		for _, m := range machines {
 			status := m.Status
 			if status == "" {
 				status = "unknown"
 			}
-			sb.WriteString(fmt.Sprintf("- %s (IP:%s, ID:%s, Status:%s)", m.Name, m.IP, m.ID, status))
+			sb.WriteString(fmt.Sprintf("\n[%s] IP:%s ID:%s Status:%s\n", m.Name, m.IP, m.ID, status))
 			if len(m.Tags) > 0 {
-				sb.WriteString(fmt.Sprintf(" [%s]", strings.Join(m.Tags, ",")))
+				sb.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(m.Tags, ", ")))
 			}
-			sb.WriteString("\n")
+			// Add live context if available
+			if ctx, ok := liveContext[m.ID]; ok && ctx != "" {
+				sb.WriteString(ctx)
+				sb.WriteString("\n")
+			}
 		}
 	}
 
-	// Add custom context (this is where wrapper can add service/container info)
+	// Add custom context
 	if config.SystemPrompt != "" {
 		sb.WriteString("\n")
 		sb.WriteString(config.SystemPrompt)
@@ -507,11 +591,26 @@ func AIAgentRoutes(r *mux.Router) {
 		// Get machines for context
 		machines := machineRepo.List()
 
+		// Determine which machines to gather context for
+		var contextMachines []*Machine
+		if len(chatReq.MachineIDs) > 0 {
+			for _, id := range chatReq.MachineIDs {
+				if m, ok := machineRepo.Get(id); ok {
+					contextMachines = append(contextMachines, m)
+				}
+			}
+		} else {
+			contextMachines = machines
+		}
+
+		// Gather live context from selected machines via SSH
+		liveContext := gatherContextForMachines(contextMachines)
+
 		// Build conversation with system prompt
 		var messages []ChatMessage
 
 		// Add system prompt
-		systemPrompt := buildSystemPrompt(config, machines)
+		systemPrompt := buildSystemPrompt(config, machines, liveContext)
 		messages = append(messages, ChatMessage{
 			Role:    "system",
 			Content: systemPrompt,
