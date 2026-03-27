@@ -529,6 +529,60 @@ func callOllama(config *AIAgentConfig, messages []ChatMessage) (string, int, err
 }
 
 // normalizeAction tries to fix common LLM format deviations into a valid AgentAction
+// fixMachineIDs resolves partial/incorrect machine IDs to valid ones
+func fixMachineIDs(ids []string, allMachines []*Machine) []string {
+	var fixed []string
+	for _, id := range ids {
+		// Already valid
+		found := false
+		for _, m := range allMachines {
+			if m.ID == id {
+				fixed = append(fixed, id)
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		// Try adding "machine-" prefix
+		prefixed := "machine-" + id
+		for _, m := range allMachines {
+			if m.ID == prefixed {
+				fixed = append(fixed, prefixed)
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		// Try matching by IP
+		for _, m := range allMachines {
+			if m.IP == id {
+				fixed = append(fixed, m.ID)
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		// Try matching by suffix
+		for _, m := range allMachines {
+			if strings.HasSuffix(m.ID, id) {
+				fixed = append(fixed, m.ID)
+				found = true
+				break
+			}
+		}
+		if !found {
+			fixed = append(fixed, id)
+		}
+	}
+	return fixed
+}
+
 func normalizeAction(raw map[string]interface{}, allMachines []*Machine) *AgentAction {
 	action := &AgentAction{}
 
@@ -568,6 +622,11 @@ func normalizeAction(raw map[string]interface{}, allMachines []*Machine) *AgentA
 		action.MachineIDs = append(action.MachineIDs, id)
 	}
 
+	// Fix any malformed machine IDs
+	if len(action.MachineIDs) > 0 {
+		action.MachineIDs = fixMachineIDs(action.MachineIDs, allMachines)
+	}
+
 	if action.Type != "" && action.Command != "" {
 		return action
 	}
@@ -598,6 +657,7 @@ func parseActions(response string, allMachines []*Machine) []AgentAction {
 		// First try strict parsing
 		var action AgentAction
 		if err := json.Unmarshal([]byte(jsonStr), &action); err == nil && action.Type != "" && len(action.MachineIDs) > 0 {
+			action.MachineIDs = fixMachineIDs(action.MachineIDs, allMachines)
 			actions = append(actions, action)
 		} else {
 			// Fallback: parse as generic map and normalize
