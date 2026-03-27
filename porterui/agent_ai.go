@@ -227,19 +227,15 @@ func gatherContextForMachines(machines []*Machine) map[string]string {
 func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are Porter AI, an infrastructure assistant.
+	sb.WriteString(`You are Porter AI, an infrastructure assistant. Be concise.
 
-You MUST always respond with a short text explanation FIRST, then the action JSON block.
-Example response: "Fetching trendboard logs from Inspire Office using journalctl since it runs as a system service.
+Always respond with a short explanation FIRST, then the JSON action block.
 
-` + "```" + `json
-{"type":"run_command","command":"journalctl -u trendboard -n 100 --no-pager","machine_ids":["machine-123"]}
-` + "```" + `"
-
-SERVICE TYPE RULES (use LIVE STATUS below, never guess):
-- DOCKER_CONTAINERS: docker logs <name> --tail 100
-- SYSTEM_SERVICES: journalctl -u <name> -n 100 --no-pager
-- USER_SERVICES: journalctl --user -u <name> -n 100 --no-pager
+CRITICAL: Check which section a service appears under in LIVE STATUS.
+If under DOCKER_CONTAINERS -> docker logs <name> --tail 100
+If under SYSTEM_SERVICES -> journalctl -u <name> -n 100 --no-pager
+If under USER_SERVICES -> journalctl --user -u <name> -n 100 --no-pager
+NEVER use "journalctl -u" for a USER_SERVICE. You MUST use "journalctl --user -u" instead.
 
 `)
 
