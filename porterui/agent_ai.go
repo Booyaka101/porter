@@ -165,7 +165,8 @@ func gatherMachineContext(m *Machine) string {
 	liveContextCacheLock.RUnlock()
 
 	// Gather docker containers, system services, and user services
-	cmd := `echo "DOCKER_CONTAINERS:"; docker ps --format '{{.Names}} ({{.Image}}, {{.Status}})' 2>/dev/null || echo "none"; echo "SYSTEM_SERVICES:"; systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v 'snap\.\|dbus\|polkit\|rtkit\|fwupd\|avahi\|bluetooth\|cups\|colord\|kerneloops\|power-profiles\|accounts-daemon\|gnome\|gdm\|cron\|rsyslog\|networkd-dispatcher\|NetworkManager\|chrony\|udisks\|switcheroo\|upower\|wpa_supplicant\|thermald\|irqbalance\|whoopsie\|bolt\|apparmor\|multipathd\|systemd-\|user@\|unattended\|ModemManager\|packagekit\|secureboot\|ubuntu-advantage' | awk '{print $1}' | sed 's/\.service//' | head -20; echo "USER_SERVICES:"; systemctl --user list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v 'at-spi\|dbus\|dconf\|evolution\|filter-chain\|gcr-\|glib\|gnome\|gsd-\|org.freedesktop\|org.gnome\|pipewire\|pulseaudio\|snap\|speech\|tracker\|wireplumber\|xdg-\|gvfs' | awk '{print $1}' | sed 's/\.service//' | head -20 || echo "none"`
+	// Output format: each line is "name -> log_command" so the LLM can just use it directly
+	cmd := `echo "RUNNING:"; docker ps --format '{{.Names}} -> logs: docker logs {{.Names}} --tail 100' 2>/dev/null; systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v 'snap\.\|dbus\|polkit\|rtkit\|fwupd\|avahi\|bluetooth\|cups\|colord\|kerneloops\|power-profiles\|accounts-daemon\|gnome\|gdm\|cron\|rsyslog\|networkd-dispatcher\|NetworkManager\|chrony\|udisks\|switcheroo\|upower\|wpa_supplicant\|thermald\|irqbalance\|whoopsie\|bolt\|apparmor\|multipathd\|systemd-\|user@\|unattended\|ModemManager\|packagekit\|secureboot\|ubuntu-advantage\|containerd\|ssh\.' | awk '{gsub(/\.service/,"",$1); print $1 " -> logs: journalctl -u " $1 " -n 100 --no-pager"}' | head -20; systemctl --user list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v 'at-spi\|dbus\|dconf\|evolution\|filter-chain\|gcr-\|glib\|gnome\|gsd-\|org.freedesktop\|org.gnome\|pipewire\|pulseaudio\|snap\|speech\|tracker\|wireplumber\|xdg-\|gvfs' | awk '{gsub(/\.service/,"",$1); print $1 " -> logs: journalctl --user -u " $1 " -n 100 --no-pager"}' | head -20`
 
 	result := runCommandOnMachine(m, cmd, false)
 	if !result.Success || result.Output == "" {
@@ -231,14 +232,12 @@ func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext m
 
 Always: short explanation first, then JSON action block.
 
-LOG COMMANDS (check LIVE STATUS to pick the right one):
-- DOCKER_CONTAINERS: docker logs <name> --tail 100
-- SYSTEM_SERVICES: journalctl -u <name> -n 100 --no-pager
-- USER_SERVICES: journalctl --user -u <name> -n 100 --no-pager
+Each service in LIVE STATUS has its exact log command after "logs:". USE THAT EXACT COMMAND.
+For health: top -b -n 1 | head -15; free -h; df -h
 
-JSON ACTION FORMAT (use this EXACT format, replace values only):
+JSON FORMAT (use EXACTLY, only replace command and machine ID):
 ` + "```" + `json
-{"type":"run_command","command":"YOUR_COMMAND","machine_ids":["MACHINE_ID"]}
+{"type":"run_command","command":"COPY_FROM_LOGS_FIELD","machine_ids":["MACHINE_ID_FROM_BELOW"]}
 ` + "```" + `
 `)
 
