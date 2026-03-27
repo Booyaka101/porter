@@ -509,6 +509,26 @@ const ScriptRunner = () => {
                             {time.toLocaleTimeString()}
                         </Typography>
 
+                        {/* AI Agent Button */}
+                        <Tooltip title="AI Agent - Chat with Porter AI">
+                            <IconButton 
+                                size="small" 
+                                onClick={() => navigate('/ai-agent')}
+                                sx={{ 
+                                    color: location.pathname === '/ai-agent' ? '#f97316' : 'rgba(255, 255, 255, 0.6)',
+                                    background: location.pathname === '/ai-agent' ? 'rgba(249, 115, 22, 0.15)' : 'transparent',
+                                    '&:hover': { 
+                                        color: '#f97316', 
+                                        background: 'rgba(249, 115, 22, 0.15)',
+                                        transform: 'scale(1.1)',
+                                    },
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                <AutoAwesomeIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
+
                         {/* Help Button */}
                         <Tooltip title="Keyboard Shortcuts (?)">
                             <IconButton 

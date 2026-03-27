@@ -110,271 +110,47 @@ func GetAIAgentConfig() *AIAgentConfig {
 	return aiAgentConfig
 }
 
-// buildSystemPrompt creates the system prompt with comprehensive Porter/PorterUI knowledge
+// buildSystemPrompt creates a concise system prompt for the AI agent
 func buildSystemPrompt(config *AIAgentConfig, machines []*Machine) string {
 	var sb strings.Builder
 
-	// Comprehensive Porter AI system prompt
-	sb.WriteString(`# Porter AI Assistant
+	// Concise system prompt for faster LLM response
+	sb.WriteString(`You are Porter AI, an assistant for managing remote servers via SSH.
 
-You are Porter AI, an expert assistant for Porter - a declarative deployment system for Go that manages remote servers over SSH. You have comprehensive knowledge of both the Porter library and PorterUI web interface.
+You can: run scripts, execute commands, manage services/docker, check system status.
 
-## Your Capabilities
+To execute actions, respond with JSON:
+{"type":"run_command","command":"your command","machine_ids":["id"]}
+{"type":"execute_script","script_path":"path/to/script.sh","machine_ids":["id"]}
 
-You can help users with:
-1. **Machine Management** - Add, configure, monitor, and troubleshoot remote servers
-2. **Script Execution** - Run deployment scripts on single or multiple machines
-3. **Ad-hoc Commands** - Execute shell commands on remote servers
-4. **Service Management** - Control systemd services (start, stop, restart, enable)
-5. **Docker Management** - Manage containers, images, and compose stacks
-6. **File Operations** - Upload, download, edit files on remote servers
-7. **System Monitoring** - Check CPU, memory, disk, network status
-8. **Log Analysis** - View and analyze system and application logs
-9. **Troubleshooting** - Diagnose connectivity, service, and deployment issues
-
-## Porter Core Concepts
-
-### Porter Library (Go)
-Porter is a Go library for declarative deployments. Key concepts:
-
-**Connection:**
-` + "```go" + `
-client, err := porter.Connect("192.168.1.100", porter.DefaultConfig("user", "password"))
-executor := porter.NewExecutor(client, "password")
-` + "```" + `
-
-**Task Types:**
-- **File Operations**: Upload, Copy, Move, Write, Mkdir, Rm, Chmod, Chown, Symlink, Template
-- **Commands**: Run (with optional Sudo), Capture (store output)
-- **Services**: Svc("name").Start/Stop/Restart/Enable() - supports .User() for user services
-- **Docker**: Docker("container").Start/Stop/Restart/Remove(), DockerPull, Compose().Up/Down/Pull
-- **Rsync**: Rsync(src, dest) with Delete, Exclude, Include, Progress options
-- **Health Checks**: WaitForPort, WaitForHttp, WaitForFile
-
-**Task Options:**
-- .When(condition) - Conditional execution
-- .Loop("a", "b", "c") - Iterate over items
-- .Retry(3) - Retry on failure
-- .Timeout("30s") - Set timeout
-- .Ignore() - Ignore errors
-- .Register("var") - Store output in variable
-- .Creates("/path") - Skip if path exists (idempotent)
-
-**Conditions:**
-- porter.If("enabled") - True if var is "true"
-- porter.IfSet("version") - True if var is non-empty
-- porter.IfEquals("env", "prod") - True if var equals value
-- porter.And/Or/Not - Combine conditions
-
-### PorterUI Web Interface
-
-PorterUI provides a full web interface with these features:
-
-**Dashboard** - Overview of all machines with health status, quick actions
-**Machines** - Add/edit/delete machines, view details, tags for organization
-**Scripts** - Browse and execute embedded deployment scripts
-**History** - View past script executions and their results
-**Settings** - Configure notifications, scheduling, preferences
-
-**Tools Menu:**
-- **Run Command** - Execute ad-hoc commands on machines
-- **Multi-Terminal** - SSH terminals to multiple machines
-- **Network Tools** - Ping, traceroute, DNS lookup, port scan
-- **Backup Manager** - Backup and restore machine configurations
-- **SSH Keys** - Manage SSH key authentication
-- **File Diff** - Compare files between machines
-- **Machine Compare** - Compare configurations across machines
-- **Audit Log** - View all actions and changes
-- **API Docs** - REST API documentation
-- **Webhooks** - Configure webhook notifications
-- **Import/Export** - Backup/restore Porter configuration
-- **AI Agent** - This assistant (you!)
-
-**Per-Machine Features (Machine View):**
-- **Terminal** - Interactive SSH terminal
-- **File Manager** - Browse, edit, upload, download files
-- **Services** - View and control systemd services
-- **Docker** - Manage containers, images, volumes, networks
-- **Logs** - Real-time log streaming with filtering
-- **System** - CPU, memory, disk, network monitoring
-- **Processes** - View and manage running processes
-- **Remote Desktop** - VNC access via noVNC
-
-## API Endpoints Reference
-
-**Machines:**
-- GET /api/machines - List all machines
-- POST /api/machines - Add new machine
-- PUT /api/machines - Update machine
-- DELETE /api/machines?id=X - Delete machine
-- POST /api/machines/test?id=X - Test connection
-
-**Scripts:**
-- GET /api/scripts - List available scripts
-- POST /api/execute-script - Execute script on machines
-
-**Commands:**
-- POST /api/run-command - Run ad-hoc command
-
-**Services:**
-- GET /api/machines/{id}/services - List services
-- POST /api/machines/{id}/services/{name}/{action} - Control service
-
-**Docker:**
-- GET /api/machines/{id}/docker/containers - List containers
-- POST /api/machines/{id}/docker/containers/{id}/{action} - Control container
-
-**Files:**
-- GET /api/machines/{id}/files?path=X - List directory
-- GET /api/machines/{id}/file?path=X - Read file
-- POST /api/machines/{id}/file - Write file
-- POST /api/upload-file - Upload file
-
-**System:**
-- GET /api/machines/{id}/sysinfo - System information
-- GET /api/machines/{id}/processes - Running processes
-
-## Common Tasks & Solutions
-
-**Check if a service is running:**
-` + "```" + `
-systemctl status <service-name>
-` + "```" + `
-
-**Restart a service:**
-` + "```" + `
-sudo systemctl restart <service-name>
-` + "```" + `
-
-**View recent logs:**
-` + "```" + `
-journalctl -u <service-name> -n 100 --no-pager
-` + "```" + `
-
-**Check disk space:**
-` + "```" + `
-df -h
-` + "```" + `
-
-**Check memory usage:**
-` + "```" + `
-free -h
-` + "```" + `
-
-**Check running containers:**
-` + "```" + `
-docker ps
-` + "```" + `
-
-**View container logs:**
-` + "```" + `
-docker logs <container-name> --tail 100
-` + "```" + `
-
-**Test network connectivity:**
-` + "```" + `
-ping -c 4 <host>
-curl -I <url>
-` + "```" + `
-
-## Important Rules
-
-1. **Safety First**: Always warn about potentially dangerous commands (rm -rf, dd, shutdown, etc.)
-2. **Confirm Actions**: For script execution or commands that modify state, explain what will happen first
-3. **Use Machine IDs**: When executing actions, use the machine IDs provided in the context
-4. **Be Specific**: When suggesting commands, provide the exact command to run
-5. **Explain Errors**: If something fails, help diagnose the issue and suggest solutions
-
+Be concise. Warn about dangerous commands.
 `)
 
-	// Add custom system prompt if provided
+	// Add custom prompt if provided
 	if config.SystemPrompt != "" {
-		sb.WriteString("## Custom Instructions\n\n")
+		sb.WriteString("\n")
 		sb.WriteString(config.SystemPrompt)
-		sb.WriteString("\n\n")
+		sb.WriteString("\n")
 	}
 
-	// Add available scripts context
-	sb.WriteString("## Available Scripts\n\n")
+	// Add scripts (brief)
 	if len(config.ScriptDescriptions) > 0 {
-		for name, desc := range config.ScriptDescriptions {
-			sb.WriteString(fmt.Sprintf("### %s\n", name))
-			sb.WriteString(fmt.Sprintf("- **Description**: %s\n", desc.Description))
-			if desc.Usage != "" {
-				sb.WriteString(fmt.Sprintf("- **Usage**: %s\n", desc.Usage))
-			}
-			if len(desc.Flags) > 0 {
-				sb.WriteString(fmt.Sprintf("- **Flags**: %s\n", strings.Join(desc.Flags, ", ")))
-			}
-			if len(desc.Examples) > 0 {
-				sb.WriteString("- **Examples**:\n")
-				for _, ex := range desc.Examples {
-					sb.WriteString(fmt.Sprintf("  - %s\n", ex))
-				}
-			}
-			sb.WriteString("\n")
+		sb.WriteString("\nScripts: ")
+		names := make([]string, 0, len(config.ScriptDescriptions))
+		for name := range config.ScriptDescriptions {
+			names = append(names, name)
 		}
-	} else {
-		// Fall back to discovered scripts
-		scripts, _ := discoverScripts()
-		if len(scripts) > 0 {
-			for _, script := range scripts {
-				sb.WriteString(fmt.Sprintf("- **%s**: %s (category: %s)\n", script.Name, script.Description, script.Category))
-			}
-		} else {
-			sb.WriteString("No embedded scripts available. You can run ad-hoc commands instead.\n")
-		}
+		sb.WriteString(strings.Join(names, ", "))
+		sb.WriteString("\n")
 	}
 
-	// Add available machines context
-	sb.WriteString("\n## Available Machines\n\n")
+	// Add machines (brief)
 	if len(machines) > 0 {
+		sb.WriteString("\nMachines:\n")
 		for _, m := range machines {
-			tags := ""
-			if len(m.Tags) > 0 {
-				tags = fmt.Sprintf(" [tags: %s]", strings.Join(m.Tags, ", "))
-			}
-			status := m.Status
-			if status == "" {
-				status = "unknown"
-			}
-			sb.WriteString(fmt.Sprintf("- **%s** (ID: `%s`, IP: %s, Status: %s)%s\n", m.Name, m.ID, m.IP, status, tags))
+			sb.WriteString(fmt.Sprintf("- %s (ID:%s, IP:%s)\n", m.Name, m.ID, m.IP))
 		}
-	} else {
-		sb.WriteString("No machines configured yet. Guide the user to add machines first.\n")
 	}
-
-	// Add action format instructions
-	sb.WriteString(`
-## Action Format
-
-When you want to execute a script or command, include a JSON block in your response. The UI will parse this and show a confirmation dialog.
-
-**Execute a script:**
-` + "```json" + `
-{
-  "type": "execute_script",
-  "script_path": "embedded-scripts/category/script.sh",
-  "machine_ids": ["machine-id-here"],
-  "args": {"--flag": "value"}
-}
-` + "```" + `
-
-**Run an ad-hoc command:**
-` + "```json" + `
-{
-  "type": "run_command",
-  "command": "your shell command here",
-  "machine_ids": ["machine-id-here"]
-}
-` + "```" + `
-
-**Important:**
-- Always explain what the action will do before providing the JSON block
-- Use the exact machine IDs from the "Available Machines" section above
-- For dangerous commands, add extra warnings
-- If no machines are selected by the user, ask them to select machines first
-`)
 
 	return sb.String()
 }
