@@ -227,22 +227,21 @@ func gatherContextForMachines(machines []*Machine) map[string]string {
 func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are Porter AI, an infrastructure assistant. Be helpful and concise.
+	sb.WriteString(`You are Porter AI, an infrastructure assistant.
 
-RESPONSE RULES:
-- Start with a brief explanation, then provide the action
-- Use the LIVE STATUS below to determine the correct command type
-- DOCKER_CONTAINERS: use "docker logs <name> --tail 100"
-- SYSTEM_SERVICES: use "journalctl -u <name> -n 100 --no-pager"  
-- USER_SERVICES: use "systemctl --user status <name>" or "journalctl --user -u <name> -n 100 --no-pager"
-- Health: "top -b -n 1 | head -15; free -h; df -h"
-- NEVER guess the service type - only use what LIVE STATUS shows
+You MUST always respond with a short text explanation FIRST, then the action JSON block.
+Example response: "Fetching trendboard logs from Inspire Office using journalctl since it runs as a system service.
 
-ACTION FORMAT (include at end when a command needs to run):
+` + "```" + `json
+{"type":"run_command","command":"journalctl -u trendboard -n 100 --no-pager","machine_ids":["machine-123"]}
+` + "```" + `"
+
+SERVICE TYPE RULES (use LIVE STATUS below, never guess):
+- DOCKER_CONTAINERS: docker logs <name> --tail 100
+- SYSTEM_SERVICES: journalctl -u <name> -n 100 --no-pager
+- USER_SERVICES: journalctl --user -u <name> -n 100 --no-pager
+
 `)
-	sb.WriteString("```json\n")
-	sb.WriteString(`{"type":"run_command","command":"your command","machine_ids":["machine-id"]}`)
-	sb.WriteString("\n```\n\n")
 
 	// Add scripts
 	if len(config.ScriptDescriptions) > 0 {
