@@ -80,7 +80,7 @@ func runnerSpaHandler(fileServer http.Handler, subFS fs.FS) http.Handler {
 }
 
 // Run starts Porter with the given configuration.
-// Wrappers should call this after setting EmbeddedScripts and ScriptDiscoveryConfig.
+// Wrappers should call this after setting EmbeddedScripts, ScriptDiscoveryConfig, and optionally AIAgentConfig.
 //
 // Example wrapper:
 //
@@ -103,6 +103,22 @@ func runnerSpaHandler(fileServer http.Handler, subFS fs.FS) http.Handler {
 //	        EmbeddedRoot: "embedded-scripts",
 //	        TopLevelScripts: map[string]bool{"setup.sh": true},
 //	    })
+//
+//	    // Configure AI Agent with script context (optional)
+//	    porterui.SetAIAgentConfig(&porterui.AIAgentConfig{
+//	        Provider: "openai", // or "anthropic", "ollama"
+//	        Model:    "gpt-4",
+//	        ScriptDescriptions: map[string]porterui.ScriptDescription{
+//	            "deploy.sh": {
+//	                Name:        "deploy.sh",
+//	                Description: "Deploy application to production servers",
+//	                Usage:       "./deploy.sh --env production --branch main",
+//	                Flags:       []string{"--env", "--branch", "--skip-tests"},
+//	                Examples:    []string{"Deploy to staging: ./deploy.sh --env staging"},
+//	            },
+//	        },
+//	    })
+//
 //	    porterui.Run(porterui.RunConfig{UIBuildFS: ui})
 //	}
 func Run(config RunConfig) {

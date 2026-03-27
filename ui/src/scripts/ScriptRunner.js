@@ -40,6 +40,7 @@ import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
 import ImportExportIcon from '@mui/icons-material/ImportExport'
 import AssessmentIcon from '@mui/icons-material/Assessment'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 
 import ErrorBoundary from './ErrorBoundary'
 import CommandPalette from './CommandPalette'
@@ -85,6 +86,7 @@ const MachineComparison = lazy(() => import('./MachineComparison'))
 const ApiDocs = lazy(() => import('./ApiDocs'))
 const Webhooks = lazy(() => import('./Webhooks'))
 const BuildClients = lazy(() => import('./BuildClients'))
+const AIAgent = lazy(() => import('./AIAgent'))
 
 // Loading fallback component
 const LoadingFallback = () => (
@@ -246,6 +248,7 @@ const ScriptRunner = () => {
         { label: 'API Docs', icon: <CodeIcon />, path: '/api-docs' },
         { label: 'Webhooks', icon: <NotificationsIcon />, path: '/webhooks' },
         { label: 'Import/Export', icon: <ImportExportIcon />, path: '/import-export' },
+        { label: 'AI Agent', icon: <AutoAwesomeIcon />, path: '/ai-agent' },
     ]
 
     const currentTab = location.pathname.startsWith('/script-wizard') ? 'scripts' 
@@ -742,6 +745,7 @@ const ScriptRunner = () => {
                             <Route path="/api-docs" element={<ApiDocs />} />
                             <Route path="/webhooks" element={<Webhooks />} />
                             <Route path="/build-clients" element={<BuildClients />} />
+                            <Route path="/ai-agent" element={<AIAgent />} />
                             <Route path="*" element={<Dashboard />} />
                         </Routes>
                     </Suspense>
