@@ -110,46 +110,55 @@ func GetAIAgentConfig() *AIAgentConfig {
 	return aiAgentConfig
 }
 
-// buildSystemPrompt creates a concise system prompt for the AI agent
+// buildSystemPrompt creates a context-aware system prompt
 func buildSystemPrompt(config *AIAgentConfig, machines []*Machine) string {
 	var sb strings.Builder
 
-	// Concise system prompt for faster LLM response
-	sb.WriteString(`You are Porter AI, an assistant for managing remote servers via SSH.
+	sb.WriteString(`You are Porter AI, an expert assistant managing this infrastructure.
 
-You can: run scripts, execute commands, manage services/docker, check system status.
+RULES:
+1. Give DIRECT answers - don't explain what you'll do, just do it
+2. For logs: use "docker logs <container> --tail 50" or "journalctl -u <service> -n 50 --no-pager"
+3. Keep commands simple and specific
+4. Use the machine IDs from INFRASTRUCTURE below
 
-To execute actions, respond with JSON:
-{"type":"run_command","command":"your command","machine_ids":["id"]}
-{"type":"execute_script","script_path":"path/to/script.sh","machine_ids":["id"]}
+ACTION FORMAT (only when command execution needed):
+{"type":"run_command","command":"your command here","machine_ids":["machine-id-here"]}
 
-Be concise. Warn about dangerous commands.
 `)
 
-	// Add custom prompt if provided
-	if config.SystemPrompt != "" {
-		sb.WriteString("\n")
-		sb.WriteString(config.SystemPrompt)
-		sb.WriteString("\n")
-	}
-
-	// Add scripts (brief)
+	// Add scripts briefly
 	if len(config.ScriptDescriptions) > 0 {
-		sb.WriteString("\nScripts: ")
+		sb.WriteString("SCRIPTS: ")
 		names := make([]string, 0, len(config.ScriptDescriptions))
 		for name := range config.ScriptDescriptions {
 			names = append(names, name)
 		}
 		sb.WriteString(strings.Join(names, ", "))
-		sb.WriteString("\n")
+		sb.WriteString("\n\n")
 	}
 
-	// Add machines (brief)
+	// Add machine context
 	if len(machines) > 0 {
-		sb.WriteString("\nMachines:\n")
+		sb.WriteString("INFRASTRUCTURE:\n")
 		for _, m := range machines {
-			sb.WriteString(fmt.Sprintf("- %s (ID:%s, IP:%s)\n", m.Name, m.ID, m.IP))
+			status := m.Status
+			if status == "" {
+				status = "unknown"
+			}
+			sb.WriteString(fmt.Sprintf("- %s (IP:%s, ID:%s, Status:%s)", m.Name, m.IP, m.ID, status))
+			if len(m.Tags) > 0 {
+				sb.WriteString(fmt.Sprintf(" [%s]", strings.Join(m.Tags, ",")))
+			}
+			sb.WriteString("\n")
 		}
+	}
+
+	// Add custom context (this is where wrapper can add service/container info)
+	if config.SystemPrompt != "" {
+		sb.WriteString("\n")
+		sb.WriteString(config.SystemPrompt)
+		sb.WriteString("\n")
 	}
 
 	return sb.String()
