@@ -385,14 +385,17 @@ func callLLM(config *AIAgentConfig, messages []ChatMessage) (string, int, error)
 	if apiKey == "" {
 		apiKey = os.Getenv("PORTER_AI_API_KEY")
 	}
-	if apiKey == "" {
-		return "", 0, fmt.Errorf("AI API key not configured. Set PORTER_AI_API_KEY environment variable or configure in wrapper")
-	}
 
 	switch config.Provider {
 	case "openai":
+		if apiKey == "" {
+			return "", 0, fmt.Errorf("AI API key not configured. Set PORTER_AI_API_KEY environment variable or configure in wrapper")
+		}
 		return callOpenAI(config, messages, apiKey)
 	case "anthropic":
+		if apiKey == "" {
+			return "", 0, fmt.Errorf("AI API key not configured. Set PORTER_AI_API_KEY environment variable or configure in wrapper")
+		}
 		return callAnthropic(config, messages, apiKey)
 	case "ollama":
 		return callOllama(config, messages)
