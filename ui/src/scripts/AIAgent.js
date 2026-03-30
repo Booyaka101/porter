@@ -39,6 +39,13 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import SettingsIcon from '@mui/icons-material/Settings'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import BugReportIcon from '@mui/icons-material/BugReport'
+import SearchIcon from '@mui/icons-material/Search'
+import LinearProgress from '@mui/material/LinearProgress'
+import Stepper from '@mui/material/Stepper'
+import Step from '@mui/material/Step'
+import StepLabel from '@mui/material/StepLabel'
+import StepContent from '@mui/material/StepContent'
 import { colors, gradients, shadows, scrollableStyles } from './theme'
 import { useAuth } from './AuthContext'
 
@@ -57,6 +64,8 @@ const AIAgent = () => {
     const [actionDialogOpen, setActionDialogOpen] = useState(false)
     const [executionResult, setExecutionResult] = useState(null)
     const [scripts, setScripts] = useState([])
+    const [debugMode, setDebugMode] = useState(false)
+    const [debugging, setDebugging] = useState(false)
     const messagesEndRef = useRef(null)
     const inputRef = useRef(null)
 
@@ -220,6 +229,71 @@ const AIAgent = () => {
             setPendingAction(null)
         }
     }
+
+    const startDebug = useCallback(async () => {
+        if (!input.trim() || debugging) return
+
+        const userMessage = {
+            role: 'user',
+            content: input.trim(),
+            timestamp: new Date().toISOString()
+        }
+
+        setMessages(prev => [...prev, userMessage])
+        setInput('')
+        setDebugging(true)
+        setLoading(true)
+
+        // Add investigating message
+        setMessages(prev => [...prev, {
+            role: 'debug-progress',
+            content: 'Investigating... Running diagnostic commands on target machines.',
+            timestamp: new Date().toISOString()
+        }])
+
+        try {
+            const res = await fetch('/api/ai-agent/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: userMessage.content,
+                    session_id: sessionId,
+                    machine_ids: selectedMachines
+                })
+            })
+
+            const data = await res.json()
+
+            // Remove the progress message
+            setMessages(prev => prev.filter(m => m.role !== 'debug-progress'))
+
+            if (data.error) {
+                setMessages(prev => [...prev, {
+                    role: 'error',
+                    content: data.error,
+                    timestamp: new Date().toISOString()
+                }])
+            } else {
+                if (data.session_id) setSessionId(data.session_id)
+                setMessages(prev => [...prev, {
+                    role: 'debug-result',
+                    content: data.summary,
+                    steps: data.steps,
+                    timestamp: data.timestamp || new Date().toISOString()
+                }])
+            }
+        } catch (err) {
+            setMessages(prev => prev.filter(m => m.role !== 'debug-progress'))
+            setMessages(prev => [...prev, {
+                role: 'error',
+                content: `Debug failed: ${err.message}`,
+                timestamp: new Date().toISOString()
+            }])
+        } finally {
+            setDebugging(false)
+            setLoading(false)
+        }
+    }, [input, debugging, sessionId, selectedMachines])
 
     const clearSession = async () => {
         if (sessionId) {
@@ -512,7 +586,7 @@ const AIAgent = () => {
                             {[
                                 'What scripts are available?',
                                 'Show me the status of all machines',
-                                'How do I deploy an application?',
+                                'Debug trendboard on 10.0.5.29',
                             ].map((suggestion, i) => (
                                 <Chip
                                     key={i}
@@ -557,6 +631,8 @@ const AIAgent = () => {
                                             ? 'rgba(239, 68, 68, 0.2)'
                                             : msg.role === 'system'
                                             ? 'rgba(34, 197, 94, 0.2)'
+                                            : (msg.role === 'debug-result' || msg.role === 'debug-progress')
+                                            ? 'rgba(59, 130, 246, 0.2)'
                                             : gradients.primary,
                                         display: 'flex',
                                         alignItems: 'center',
@@ -569,6 +645,8 @@ const AIAgent = () => {
                                             <ErrorIcon sx={{ fontSize: 20, color: colors.error }} />
                                         ) : msg.role === 'system' ? (
                                             <CheckCircleIcon sx={{ fontSize: 20, color: colors.secondary }} />
+                                        ) : (msg.role === 'debug-result' || msg.role === 'debug-progress') ? (
+                                            <BugReportIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
                                         ) : (
                                             <SmartToyIcon sx={{ fontSize: 20, color: '#fff' }} />
                                         )}
@@ -582,6 +660,8 @@ const AIAgent = () => {
                                             ? 'rgba(239, 68, 68, 0.1)'
                                             : msg.role === 'system'
                                             ? 'rgba(34, 197, 94, 0.1)'
+                                            : (msg.role === 'debug-result' || msg.role === 'debug-progress')
+                                            ? 'rgba(59, 130, 246, 0.05)'
                                             : colors.background.card,
                                         border: `1px solid ${
                                             msg.role === 'user'
@@ -590,12 +670,134 @@ const AIAgent = () => {
                                                 ? 'rgba(239, 68, 68, 0.2)'
                                                 : msg.role === 'system'
                                                 ? 'rgba(34, 197, 94, 0.2)'
+                                                : (msg.role === 'debug-result' || msg.role === 'debug-progress')
+                                                ? 'rgba(59, 130, 246, 0.2)'
                                                 : colors.border.light
                                         }`,
                                         borderRadius: '12px',
+                                        ...(msg.role === 'debug-result' ? { maxWidth: '100%', width: '100%' } : {}),
                                     }}>
                                         <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                                            {renderMessageContent(msg.content)}
+                                            {msg.role === 'debug-progress' ? (
+                                                <Box>
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                                        <SearchIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
+                                                        <Typography sx={{ color: '#3b82f6', fontWeight: 600, fontSize: '0.9rem' }}>
+                                                            Investigating...
+                                                        </Typography>
+                                                    </Box>
+                                                    <Typography sx={{ color: colors.text.muted, fontSize: '0.85rem', mb: 1 }}>
+                                                        Running diagnostic commands on target machines. This may take a minute.
+                                                    </Typography>
+                                                    <LinearProgress sx={{ 
+                                                        borderRadius: 4,
+                                                        '& .MuiLinearProgress-bar': { background: '#3b82f6' },
+                                                        background: 'rgba(59, 130, 246, 0.1)',
+                                                    }} />
+                                                </Box>
+                                            ) : msg.role === 'debug-result' ? (
+                                                <Box>
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                                                        <BugReportIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                                                        <Typography sx={{ color: '#3b82f6', fontWeight: 700, fontSize: '1rem' }}>
+                                                            Debug Investigation Complete
+                                                        </Typography>
+                                                        <Chip label={`${msg.steps?.length || 0} steps`} size="small" sx={{
+                                                            background: 'rgba(59, 130, 246, 0.1)',
+                                                            color: '#3b82f6',
+                                                            fontSize: '0.75rem',
+                                                        }} />
+                                                    </Box>
+
+                                                    {/* Investigation Steps */}
+                                                    {msg.steps && msg.steps.length > 0 && (
+                                                        <Box sx={{ mb: 2 }}>
+                                                            <Typography sx={{ color: colors.text.muted, fontSize: '0.8rem', mb: 1, fontWeight: 600 }}>
+                                                                Investigation Steps:
+                                                            </Typography>
+                                                            {msg.steps.map((step, si) => (
+                                                                <Box key={si} sx={{
+                                                                    mb: 1,
+                                                                    background: 'rgba(0,0,0,0.2)',
+                                                                    borderRadius: '8px',
+                                                                    p: 1.5,
+                                                                    borderLeft: `3px solid ${step.error && !step.output ? '#ef4444' : '#22c55e'}`,
+                                                                }}>
+                                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                                                                        <Chip label={`Step ${step.step}`} size="small" sx={{
+                                                                            background: 'rgba(255,255,255,0.05)',
+                                                                            color: colors.text.muted,
+                                                                            fontSize: '0.7rem',
+                                                                            height: 20,
+                                                                        }} />
+                                                                        <Typography sx={{ color: colors.text.secondary, fontSize: '0.8rem', fontWeight: 600 }}>
+                                                                            {step.action}
+                                                                        </Typography>
+                                                                        {step.machine && (
+                                                                            <Chip label={step.machine} size="small" sx={{
+                                                                                background: 'rgba(249, 115, 22, 0.1)',
+                                                                                color: colors.primary,
+                                                                                fontSize: '0.7rem',
+                                                                                height: 20,
+                                                                            }} />
+                                                                        )}
+                                                                    </Box>
+                                                                    <Typography sx={{ 
+                                                                        color: colors.text.muted, 
+                                                                        fontSize: '0.75rem',
+                                                                        fontFamily: 'monospace',
+                                                                        mb: 0.5,
+                                                                    }}>
+                                                                        $ {step.command}
+                                                                    </Typography>
+                                                                    {step.output && (
+                                                                        <Box sx={{
+                                                                            background: 'rgba(0,0,0,0.3)',
+                                                                            borderRadius: '4px',
+                                                                            p: 1,
+                                                                            maxHeight: 150,
+                                                                            overflow: 'auto',
+                                                                            ...scrollableStyles.customScrollbar,
+                                                                        }}>
+                                                                            <Typography sx={{ 
+                                                                                fontFamily: 'monospace',
+                                                                                fontSize: '0.75rem',
+                                                                                color: colors.text.secondary,
+                                                                                whiteSpace: 'pre-wrap',
+                                                                                wordBreak: 'break-word',
+                                                                            }}>
+                                                                                {step.output}
+                                                                            </Typography>
+                                                                        </Box>
+                                                                    )}
+                                                                    {step.error && (
+                                                                        <Typography sx={{ color: '#ef4444', fontSize: '0.75rem', mt: 0.5 }}>
+                                                                            {step.error}
+                                                                        </Typography>
+                                                                    )}
+                                                                </Box>
+                                                            ))}
+                                                        </Box>
+                                                    )}
+
+                                                    <Divider sx={{ borderColor: 'rgba(59, 130, 246, 0.2)', my: 2 }} />
+
+                                                    {/* Analysis Summary */}
+                                                    <Box sx={{
+                                                        background: 'rgba(59, 130, 246, 0.05)',
+                                                        borderRadius: '8px',
+                                                        p: 2,
+                                                        border: '1px solid rgba(59, 130, 246, 0.15)',
+                                                    }}>
+                                                        <Typography sx={{ color: '#3b82f6', fontWeight: 700, fontSize: '0.9rem', mb: 1 }}>
+                                                            Analysis & Recommendations
+                                                        </Typography>
+                                                        {renderMessageContent(msg.content)}
+                                                    </Box>
+                                                </Box>
+                                            ) : (
+                                                <>{renderMessageContent(msg.content)}</>
+                                            )}
                                             
                                             {/* Actions */}
                                             {msg.actions && msg.actions.length > 0 && (
@@ -755,6 +957,33 @@ const AIAgent = () => {
                         }
                     }}
                 />
+                <Tooltip title="Debug / Investigate">
+                    <span>
+                        <Button
+                            variant="contained"
+                            onClick={startDebug}
+                            disabled={!input.trim() || loading}
+                            sx={{
+                                minWidth: 56,
+                                height: 56,
+                                borderRadius: '12px',
+                                background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                                '&:hover': {
+                                    background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                                },
+                                '&.Mui-disabled': {
+                                    background: 'rgba(255,255,255,0.1)',
+                                }
+                            }}
+                        >
+                            {debugging ? (
+                                <CircularProgress size={24} sx={{ color: '#fff' }} />
+                            ) : (
+                                <BugReportIcon />
+                            )}
+                        </Button>
+                    </span>
+                </Tooltip>
                 <Button
                     variant="contained"
                     onClick={sendMessage}
@@ -772,7 +1001,7 @@ const AIAgent = () => {
                         }
                     }}
                 >
-                    {loading ? (
+                    {loading && !debugging ? (
                         <CircularProgress size={24} sx={{ color: colors.background.dark }} />
                     ) : (
                         <SendIcon />

@@ -40,6 +40,7 @@ func SetupRoutes(r *mux.Router) {
 	SetupAgentRoutes(r)
 	BuildClientRoutes(r)
 	AIAgentRoutes(r)
+	AIAgentDebugRoutes(r)
 }
 
 // SetupRoutesWithAuth sets up routes with authentication middleware
@@ -81,4 +82,5 @@ func SetupRoutesWithAuth(r *mux.Router) {
 	DashboardWSRoutes(r)
 	BuildClientRoutes(r)
 	AIAgentRoutes(r)
+	AIAgentDebugRoutes(r)
 }
