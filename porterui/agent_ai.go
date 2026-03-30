@@ -316,6 +316,18 @@ func isHealthOverviewQuery(message string) bool {
 	return hasHealth && hasBroad
 }
 
+// isTimeQuery detects time/date related queries
+func isTimeQuery(message string) bool {
+	msg := strings.ToLower(message)
+	timePatterns := []string{"what time", "what is the time", "current time", "server time", "date and time", "datetime", "datetimectl", "timedatectl", "tell me the time", "tell me the date", "what date"}
+	for _, p := range timePatterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // needsMachineContext returns true if the message appears to be about infrastructure,
 // machines, services, or anything that would benefit from live SSH context.
 // Returns false for general knowledge questions, greetings, etc.
@@ -978,6 +990,55 @@ func AIAgentRoutes(r *mux.Router) {
 
 		// Get machines for context
 		machines := machineRepo.List()
+
+		// Fast path: time/date queries
+		if isTimeQuery(chatReq.Message) {
+			msg := strings.ToLower(chatReq.Message)
+			// Resolve mentioned machines
+			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
+			var targetMachines []*Machine
+			if len(chatReq.MachineIDs) > 0 {
+				for _, id := range chatReq.MachineIDs {
+					if m, ok := machineRepo.Get(id); ok {
+						targetMachines = append(targetMachines, m)
+					}
+				}
+			}
+			for _, m := range mentioned {
+				targetMachines = append(targetMachines, m)
+			}
+
+			if len(targetMachines) > 0 {
+				// Run date on specific machines
+				var sb strings.Builder
+				for _, m := range targetMachines {
+					result := runCommandOnMachine(m, "date", false)
+					if result.Success {
+						output := strings.TrimSpace(result.Output)
+						if idx := strings.LastIndex(output, "EXIT_CODE:"); idx != -1 {
+							output = strings.TrimSpace(output[:idx])
+						}
+						sb.WriteString(fmt.Sprintf("**%s**: %s\n", m.Name, output))
+					} else {
+						sb.WriteString(fmt.Sprintf("**%s**: Could not retrieve time\n", m.Name))
+					}
+				}
+				json.NewEncoder(w).Encode(ChatResponse{
+					Message:   sb.String(),
+					SessionID: sessionID,
+					Timestamp: time.Now(),
+				})
+				return
+			} else if !strings.Contains(msg, "server") || strings.Contains(msg, "all") {
+				// General time question - answer with Porter server time
+				json.NewEncoder(w).Encode(ChatResponse{
+					Message:   fmt.Sprintf("The current server time is **%s**", time.Now().Format("Mon Jan 2 15:04:05 MST 2006")),
+					SessionID: sessionID,
+					Timestamp: time.Now(),
+				})
+				return
+			}
+		}
 
 		// Fast path: health overview queries answered server-side (no LLM)
 		if isHealthOverviewQuery(chatReq.Message) {
