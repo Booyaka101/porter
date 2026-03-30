@@ -487,10 +487,19 @@ func callOllama(config *AIAgentConfig, messages []ChatMessage) (string, int, err
 		}
 	}
 
+	maxTokens := config.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 2048
+	}
+
 	reqBody := map[string]interface{}{
 		"model":    model,
 		"messages": ollamaMessages,
 		"stream":   false,
+		"options": map[string]interface{}{
+			"num_predict": maxTokens,
+			"num_ctx":     4096,
+		},
 	}
 
 	jsonBody, _ := json.Marshal(reqBody)

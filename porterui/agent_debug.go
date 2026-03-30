@@ -299,59 +299,55 @@ func buildSystemCommands() []debugCmd {
 	}
 }
 
-// buildGeneralCommands generates a broad health overview
+// buildGeneralCommands generates a lightweight health overview
 func buildGeneralCommands() []debugCmd {
 	return []debugCmd{
-		{"uptime", "System uptime and load", false},
-		{"free -h", "Memory and swap usage", false},
-		{"df -h / /home 2>/dev/null", "Disk usage on key partitions", false},
-		{"systemctl --failed 2>/dev/null", "Failed systemd units", true},
-		{"systemctl --user --failed 2>/dev/null", "Failed user systemd units", false},
-		{"docker ps -a --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null | head -20", "Docker container status", true},
-		{"ps aux --sort=-%cpu | head -10", "Top CPU processes", false},
-		{"journalctl -p err --since '1 hour ago' --no-pager 2>/dev/null | tail -15", "Recent system errors", true},
-		{"dmesg -T 2>/dev/null | grep -i -E 'error|fail|oom|panic' | tail -10", "Recent kernel errors", true},
+		{"uptime && free -h && df -h /", "System overview (uptime, memory, disk)", false},
+		{"systemctl --failed 2>/dev/null; systemctl --user --failed 2>/dev/null", "Failed systemd units", false},
+		{"docker ps -a --format '{{.Names}}\t{{.Status}}' 2>/dev/null | head -15", "Docker container status", true},
+		{"journalctl -p err --since '1 hour ago' --no-pager 2>/dev/null | tail -10", "Recent system errors", true},
 	}
 }
 
-// buildDebugCommands generates investigation commands based on categories and optional service target
+// buildDebugCommands generates investigation commands based on context
+// Priority: service-specific > category-specific > general fallback
 func buildDebugCommands(categories []debugCategory, targetService *serviceInfo) []debugCmd {
-	var cmds []debugCmd
 	seen := make(map[string]bool)
-
-	addUnique := func(newCmds []debugCmd) {
+	addUnique := func(cmds []debugCmd, newCmds []debugCmd) []debugCmd {
 		for _, c := range newCmds {
 			if !seen[c.Command] {
 				seen[c.Command] = true
 				cmds = append(cmds, c)
 			}
 		}
+		return cmds
 	}
 
+	// If a specific service was identified, only investigate that service
 	if targetService != nil {
-		addUnique(buildServiceCommands(targetService))
+		return addUnique(nil, buildServiceCommands(targetService))
 	}
 
+	// If specific categories were detected (not general), only run those
+	var cmds []debugCmd
 	for _, cat := range categories {
 		switch cat {
 		case catNetwork:
-			addUnique(buildNetworkCommands())
+			cmds = addUnique(cmds, buildNetworkCommands())
 		case catDisk:
-			addUnique(buildDiskCommands())
+			cmds = addUnique(cmds, buildDiskCommands())
 		case catMemory:
-			addUnique(buildMemoryCommands())
+			cmds = addUnique(cmds, buildMemoryCommands())
 		case catCPU:
-			addUnique(buildCPUCommands())
+			cmds = addUnique(cmds, buildCPUCommands())
 		case catDocker:
-			addUnique(buildDockerCommands())
+			cmds = addUnique(cmds, buildDockerCommands())
 		case catSecurity:
-			addUnique(buildSecurityCommands())
+			cmds = addUnique(cmds, buildSecurityCommands())
 		case catSystem:
-			addUnique(buildSystemCommands())
+			cmds = addUnique(cmds, buildSystemCommands())
 		case catGeneral:
-			addUnique(buildGeneralCommands())
-		case catService:
-			// already handled above
+			cmds = addUnique(cmds, buildGeneralCommands())
 		}
 	}
 
@@ -368,8 +364,8 @@ func cleanCommandOutput(output string) string {
 			output = strings.TrimSpace(output[idx+nl:])
 		}
 	}
-	if len(output) > 3000 {
-		output = output[len(output)-3000:]
+	if len(output) > 1500 {
+		output = output[len(output)-1500:]
 	}
 	return output
 }
