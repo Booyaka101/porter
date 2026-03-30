@@ -923,6 +923,12 @@ func AIAgentRoutes(r *mux.Router) {
 				return
 			}
 
+			// User-scoped commands must not run with sudo
+			cmdSudo := useSudo
+			if strings.Contains(validatedCmd, "--user") {
+				cmdSudo = false
+			}
+
 			// Execute on each machine
 			var results []ExecutionResult
 			for _, machineID := range action.MachineIDs {
@@ -930,7 +936,7 @@ func AIAgentRoutes(r *mux.Router) {
 				if !exists {
 					continue
 				}
-				result := runCommandOnMachine(machine, validatedCmd, useSudo)
+				result := runCommandOnMachine(machine, validatedCmd, cmdSudo)
 				results = append(results, result)
 			}
 
