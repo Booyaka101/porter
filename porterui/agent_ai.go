@@ -165,7 +165,7 @@ func gatherMachineContext(m *Machine) string {
 	liveContextCacheLock.RUnlock()
 
 	// Gather health metrics + service list in one SSH call
-	cmd := `echo "HEALTH:"; uptime | sed 's/.*up/up/'; free -h | awk '/^Mem:/{print "Memory: "$3"/"$2" used ("$7" available)"}'; df -h / | awk 'NR==2{print "Disk /: "$3"/"$2" used ("$5")"}'; echo ""; echo "DOCKER:"; docker ps -a --format '{{.Names}}\t{{.Status}}' 2>/dev/null; echo ""; echo "SERVICES:"; docker ps --format '{{.Names}} -> logs: docker logs {{.Names}} --tail 100' 2>/dev/null; systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v -E 'snap\.|dbus|polkit|rtkit|fwupd|avahi|bluetooth|cups|colord|kerneloops|power-profiles|accounts-daemon|gnome|gdm|cron|rsyslog|networkd-dispatcher|NetworkManager|chrony|udisks|switcheroo|upower|wpa_supplicant|thermald|irqbalance|whoopsie|bolt|apparmor|multipathd|systemd-|user@|unattended|ModemManager|packagekit|secureboot|ubuntu-advantage|containerd|ssh\.' | awk '{gsub(/\.service/,"",$1); print $1 " -> logs: journalctl -u " $1 " -n 100 --no-pager"}' | head -20; systemctl --user list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v -E 'at-spi|dbus|dconf|evolution|filter-chain|gcr-|glib|gnome|gsd-|org.freedesktop|org.gnome|pipewire|pulseaudio|snap|speech|tracker|wireplumber|xdg-|gvfs' | awk '{gsub(/\.service/,"",$1); print $1 " -> logs: journalctl --user -u " $1 " -n 100 --no-pager"}' | head -20`
+	cmd := `echo "HEALTH:"; uptime | sed 's/.*up/up/'; free -h | awk '/^Mem:/{print "Memory: "$3"/"$2" used ("$7" available)"}'; df -h / | awk 'NR==2{print "Disk /: "$3"/"$2" used ("$5")"}'; echo ""; echo "DOCKER:"; docker ps -a --format '{{.Names}}\t{{.Status}}' 2>/dev/null; echo ""; echo "SERVICES:"; docker ps --format '{{.Names}} [docker] -> logs: docker logs {{.Names}} --tail 100' 2>/dev/null; systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v -E 'snap\.|dbus|polkit|rtkit|fwupd|avahi|bluetooth|cups|colord|kerneloops|power-profiles|accounts-daemon|gnome|gdm|cron|rsyslog|networkd-dispatcher|NetworkManager|chrony|udisks|switcheroo|upower|wpa_supplicant|thermald|irqbalance|whoopsie|bolt|apparmor|multipathd|systemd-|user@|unattended|ModemManager|packagekit|secureboot|ubuntu-advantage|containerd|ssh\.' | awk '{gsub(/\.service/,"",$1); print $1 " [system] -> logs: journalctl -u " $1 " -n 100 --no-pager"}' | head -20; systemctl --user list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | grep -v -E 'at-spi|dbus|dconf|evolution|filter-chain|gcr-|glib|gnome|gsd-|org.freedesktop|org.gnome|pipewire|pulseaudio|snap|speech|tracker|wireplumber|xdg-|gvfs' | awk '{gsub(/\.service/,"",$1); print $1 " [user] -> logs: journalctl --user -u " $1 " -n 100 --no-pager"}' | head -20`
 
 	result := runCommandOnMachine(m, cmd, false)
 	if !result.Success || result.Output == "" {
@@ -314,6 +314,93 @@ func isHealthOverviewQuery(message string) bool {
 		}
 	}
 	return hasHealth && hasBroad
+}
+
+// parseServiceAction detects service management patterns like "restart X", "stop X", "start X"
+func parseServiceAction(message string) (action string, serviceName string) {
+	msg := strings.ToLower(message)
+	actions := []string{"restart", "stop", "start", "status"}
+	for _, a := range actions {
+		idx := strings.Index(msg, a)
+		if idx == -1 {
+			continue
+		}
+		// Extract words after the action
+		rest := strings.TrimSpace(msg[idx+len(a):])
+		words := strings.Fields(rest)
+		// Skip common filler words
+		for len(words) > 0 {
+			w := words[0]
+			if w == "the" || w == "service" || w == "on" || w == "for" {
+				words = words[1:]
+				continue
+			}
+			break
+		}
+		if len(words) > 0 {
+			// The first meaningful word is the service name (skip IPs and "on")
+			svc := words[0]
+			if svc != "on" && svc != "all" && !ipRegex.MatchString(svc) {
+				return a, svc
+			}
+			// Maybe service name is after "on <machine>" pattern - try second word
+			if len(words) > 1 && !ipRegex.MatchString(words[1]) && words[1] != "on" {
+				return a, words[1]
+			}
+		}
+	}
+	return "", ""
+}
+
+// detectServiceType checks the live context to determine if a service is docker, system, or user
+func detectServiceType(ctx string, serviceName string) string {
+	svcLower := strings.ToLower(serviceName)
+	inServices := false
+	for _, line := range strings.Split(ctx, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "SERVICES:" {
+			inServices = true
+			continue
+		}
+		if !inServices {
+			continue
+		}
+		lineLower := strings.ToLower(trimmed)
+		if strings.Contains(lineLower, svcLower) {
+			if strings.Contains(trimmed, "[docker]") {
+				return "docker"
+			}
+			if strings.Contains(trimmed, "[user]") {
+				return "user"
+			}
+			if strings.Contains(trimmed, "[system]") {
+				return "system"
+			}
+			// Fallback: check by log command pattern
+			if strings.Contains(trimmed, "docker logs") {
+				return "docker"
+			}
+			if strings.Contains(trimmed, "journalctl --user") {
+				return "user"
+			}
+			if strings.Contains(trimmed, "journalctl -u") {
+				return "system"
+			}
+		}
+	}
+	return "system"
+}
+
+// buildServiceCommand generates the correct command for a service action based on service type
+func buildServiceCommand(action, serviceName, serviceType string) string {
+	switch serviceType {
+	case "docker":
+		return fmt.Sprintf("docker %s %s", action, serviceName)
+	case "user":
+		return fmt.Sprintf("systemctl --user %s %s", action, serviceName)
+	default:
+		return fmt.Sprintf("sudo systemctl %s %s", action, serviceName)
+	}
 }
 
 // isTimeQuery detects time/date related queries
@@ -1035,6 +1122,55 @@ func AIAgentRoutes(r *mux.Router) {
 					Message:   fmt.Sprintf("The current server time is **%s**", time.Now().Format("Mon Jan 2 15:04:05 MST 2006")),
 					SessionID: sessionID,
 					Timestamp: time.Now(),
+				})
+				return
+			}
+		}
+
+		// Fast path: service management (restart/stop/start)
+		if action, svcName := parseServiceAction(chatReq.Message); action != "" && svcName != "" {
+			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
+			var targetMachines []*Machine
+			if len(chatReq.MachineIDs) > 0 {
+				for _, id := range chatReq.MachineIDs {
+					if m, ok := machineRepo.Get(id); ok {
+						targetMachines = append(targetMachines, m)
+					}
+				}
+			}
+			for _, m := range mentioned {
+				found := false
+				for _, existing := range targetMachines {
+					if existing.ID == m.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					targetMachines = append(targetMachines, m)
+				}
+			}
+
+			if len(targetMachines) > 0 {
+				liveContext := gatherContextForMachines(targetMachines)
+				var sb strings.Builder
+				var actions []AgentAction
+				for _, m := range targetMachines {
+					ctx := liveContext[m.ID]
+					svcType := detectServiceType(ctx, svcName)
+					cmd := buildServiceCommand(action, svcName, svcType)
+					sb.WriteString(fmt.Sprintf("**%s** on **%s**: `%s`\n", strings.Title(action), m.Name, cmd))
+					actions = append(actions, AgentAction{
+						Type:       "run_command",
+						Command:    cmd,
+						MachineIDs: []string{m.ID},
+					})
+				}
+				json.NewEncoder(w).Encode(ChatResponse{
+					Message:   sb.String(),
+					SessionID: sessionID,
+					Timestamp: time.Now(),
+					Actions:   actions,
 				})
 				return
 			}
