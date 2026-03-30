@@ -136,9 +136,14 @@ func detectCategories(message string) []debugCategory {
 // parseServicesFromContext extracts service names and their log commands from live context
 func parseServicesFromContext(ctx string) []serviceInfo {
 	var services []serviceInfo
+	inServices := false
 	for _, line := range strings.Split(ctx, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || line == "RUNNING:" {
+		if line == "SERVICES:" {
+			inServices = true
+			continue
+		}
+		if !inServices || line == "" || line == "HEALTH:" || line == "DOCKER:" || line == "RUNNING:" {
 			continue
 		}
 		parts := strings.SplitN(line, " -> logs: ", 2)
