@@ -401,17 +401,21 @@ func buildHealthOverview(machines []*Machine, liveContext map[string]string) str
 func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string, focusedMachineIDs map[string]bool) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are Porter AI, an infrastructure assistant. Be concise and direct.
+	sb.WriteString(fmt.Sprintf(`You are Porter AI, an infrastructure assistant. Be concise and direct.
 Do NOT include IP addresses in your responses. Use machine display names only.
+Current server time: %s
 
 RULES:
-1. For health/status questions: Answer DIRECTLY using the machine data below. List ALL machines with their metrics. Do NOT suggest commands.
-2. For action requests (run, restart, check logs, execute): Provide a short explanation then a JSON action block.
-3. Each service has its exact log command after "logs:". USE THAT EXACT COMMAND in action blocks.
+1. For general questions (time, date, explanations, advice, concepts): Answer DIRECTLY in plain text. NO JSON action blocks. You know the current time (shown above).
+2. For health/status questions: Answer DIRECTLY using the machine data below. NO JSON action blocks.
+3. ONLY for explicit action requests (run, restart, check logs, deploy, execute): Give a short explanation, then ONE JSON action block with the REAL machine ID from the list below.
+4. For systemd services: The SERVICES section shows the EXACT command for each service. User-level services show "journalctl --user -u", system services show "journalctl -u". COPY the exact command shown - do NOT change the flags.
+5. NEVER use placeholder values like "MACHINE_ID" or "MACHINE_ID_FROM_BELOW". Always use the actual ID from the machine list.
+6. If the user does not mention a specific machine, do NOT suggest running commands. Just answer the question.
 
-JSON FORMAT (only when user asks to DO something):
-` + "```" + `json
-{"type":"run_command","command":"THE_COMMAND","machine_ids":["MACHINE_ID"]}
+JSON FORMAT (ONLY for rule 3 - explicit action requests):
+`, time.Now().Format("Mon Jan 2 15:04:05 MST 2006")) + "```" + `json
+{"type":"run_command","command":"actual_command_here","machine_ids":["actual-machine-id-here"]}
 ` + "```" + `
 `)
 
