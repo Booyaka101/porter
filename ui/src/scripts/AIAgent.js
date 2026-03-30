@@ -121,8 +121,77 @@ const AIAgent = () => {
         loadScripts()
     }, [])
 
+    const startDebug = useCallback(async () => {
+        if (!input.trim() || debugging) return
+
+        const userMessage = {
+            role: 'user',
+            content: input.trim(),
+            timestamp: new Date().toISOString()
+        }
+
+        setMessages(prev => [...prev, userMessage])
+        setInput('')
+        setDebugging(true)
+        setLoading(true)
+
+        setMessages(prev => [...prev, {
+            role: 'debug-progress',
+            content: 'Investigating... Running diagnostic commands on target machines.',
+            timestamp: new Date().toISOString()
+        }])
+
+        try {
+            const res = await fetch('/api/ai-agent/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: userMessage.content,
+                    session_id: sessionId,
+                    machine_ids: selectedMachines
+                })
+            })
+
+            const data = await res.json()
+
+            setMessages(prev => prev.filter(m => m.role !== 'debug-progress'))
+
+            if (data.error) {
+                setMessages(prev => [...prev, {
+                    role: 'error',
+                    content: data.error,
+                    timestamp: new Date().toISOString()
+                }])
+            } else {
+                if (data.session_id) setSessionId(data.session_id)
+                setMessages(prev => [...prev, {
+                    role: 'debug-result',
+                    content: data.summary,
+                    steps: data.steps,
+                    timestamp: data.timestamp || new Date().toISOString()
+                }])
+            }
+        } catch (err) {
+            setMessages(prev => prev.filter(m => m.role !== 'debug-progress'))
+            setMessages(prev => [...prev, {
+                role: 'error',
+                content: `Debug failed: ${err.message}`,
+                timestamp: new Date().toISOString()
+            }])
+        } finally {
+            setDebugging(false)
+            setLoading(false)
+        }
+    }, [input, debugging, sessionId, selectedMachines])
+
     const sendMessage = useCallback(async () => {
         if (!input.trim() || loading) return
+
+        // Auto-detect debug intent and route to debug endpoint
+        const debugKeywords = /\b(debug|diagnose|investigate|troubleshoot|what'?s wrong)\b/i
+        if (debugKeywords.test(input.trim())) {
+            return startDebug()
+        }
 
         const userMessage = {
             role: 'user',
@@ -178,7 +247,7 @@ const AIAgent = () => {
         } finally {
             setLoading(false)
         }
-    }, [input, loading, sessionId, selectedMachines])
+    }, [input, loading, sessionId, selectedMachines, startDebug])
 
     const executeAction = async (action) => {
         setActionDialogOpen(false)
@@ -229,71 +298,6 @@ const AIAgent = () => {
             setPendingAction(null)
         }
     }
-
-    const startDebug = useCallback(async () => {
-        if (!input.trim() || debugging) return
-
-        const userMessage = {
-            role: 'user',
-            content: input.trim(),
-            timestamp: new Date().toISOString()
-        }
-
-        setMessages(prev => [...prev, userMessage])
-        setInput('')
-        setDebugging(true)
-        setLoading(true)
-
-        // Add investigating message
-        setMessages(prev => [...prev, {
-            role: 'debug-progress',
-            content: 'Investigating... Running diagnostic commands on target machines.',
-            timestamp: new Date().toISOString()
-        }])
-
-        try {
-            const res = await fetch('/api/ai-agent/debug', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: userMessage.content,
-                    session_id: sessionId,
-                    machine_ids: selectedMachines
-                })
-            })
-
-            const data = await res.json()
-
-            // Remove the progress message
-            setMessages(prev => prev.filter(m => m.role !== 'debug-progress'))
-
-            if (data.error) {
-                setMessages(prev => [...prev, {
-                    role: 'error',
-                    content: data.error,
-                    timestamp: new Date().toISOString()
-                }])
-            } else {
-                if (data.session_id) setSessionId(data.session_id)
-                setMessages(prev => [...prev, {
-                    role: 'debug-result',
-                    content: data.summary,
-                    steps: data.steps,
-                    timestamp: data.timestamp || new Date().toISOString()
-                }])
-            }
-        } catch (err) {
-            setMessages(prev => prev.filter(m => m.role !== 'debug-progress'))
-            setMessages(prev => [...prev, {
-                role: 'error',
-                content: `Debug failed: ${err.message}`,
-                timestamp: new Date().toISOString()
-            }])
-        } finally {
-            setDebugging(false)
-            setLoading(false)
-        }
-    }, [input, debugging, sessionId, selectedMachines])
 
     const clearSession = async () => {
         if (sessionId) {

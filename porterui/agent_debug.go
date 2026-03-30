@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -35,120 +36,139 @@ type DebugResponse struct {
 	Timestamp time.Time   `json:"timestamp"`
 }
 
-// isReadOnlyCommand checks if a command is safe to auto-execute (no mutations)
-func isReadOnlyCommand(cmd string) bool {
-	readOnlyPrefixes := []string{
-		"journalctl", "systemctl status", "systemctl --user status",
-		"systemctl list-units", "systemctl --user list-units",
-		"docker logs", "docker ps", "docker inspect", "docker stats",
-		"cat ", "head ", "tail ", "grep ", "less ", "more ",
-		"ls ", "find ", "stat ", "file ", "wc ",
-		"top -b", "free ", "df ", "uptime", "uname",
-		"ps ", "pgrep ", "pidof ",
-		"ip addr", "ip route", "ss ", "netstat ", "ping ",
-		"curl -s", "wget -q",
-		"date", "hostname", "whoami", "id ",
-		"du ", "lsof ", "dmesg",
-	}
-	trimmed := strings.TrimSpace(cmd)
-	for _, prefix := range readOnlyPrefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			return true
-		}
-	}
-	return false
+// serviceInfo parsed from live context
+type serviceInfo struct {
+	Name       string
+	LogCommand string
+	Type       string // "docker", "system", "user"
 }
 
-// debugInvestigate is a single-pass JSON list response from the LLM
-type debugCommand struct {
-	Command   string `json:"command"`
-	MachineID string `json:"machine_id"`
-	Reason    string `json:"reason"`
+// parseServicesFromContext extracts service names and their log commands from live context
+func parseServicesFromContext(ctx string) []serviceInfo {
+	var services []serviceInfo
+	for _, line := range strings.Split(ctx, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "RUNNING:" {
+			continue
+		}
+		// Format: "name -> logs: command"
+		parts := strings.SplitN(line, " -> logs: ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		logCmd := strings.TrimSpace(parts[1])
+		svcType := "system"
+		if strings.HasPrefix(logCmd, "docker logs") {
+			svcType = "docker"
+		} else if strings.Contains(logCmd, "--user") {
+			svcType = "user"
+		}
+		services = append(services, serviceInfo{Name: name, LogCommand: logCmd, Type: svcType})
+	}
+	return services
 }
 
-// buildDebugPrompt creates the system prompt for debug mode
-func buildDebugPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string) string {
-	var sb strings.Builder
+// extractServiceName tries to find a service name mentioned in the user's message
+func extractServiceName(message string, services []serviceInfo) *serviceInfo {
+	msgLower := strings.ToLower(message)
+	for i, svc := range services {
+		if strings.Contains(msgLower, strings.ToLower(svc.Name)) {
+			return &services[i]
+		}
+	}
+	return nil
+}
 
-	sb.WriteString(`You are Porter AI in DEBUG MODE. You investigate infrastructure issues.
+// buildDebugCommands programmatically generates investigation commands
+func buildDebugCommands(targetService *serviceInfo, machine *Machine) []struct {
+	Command string
+	Reason  string
+} {
+	var cmds []struct {
+		Command string
+		Reason  string
+	}
 
-Given the user's problem and LIVE STATUS below, output a JSON array of commands to investigate.
-Each command object has: command, machine_id, reason.
+	if targetService != nil {
+		// Service-specific investigation
+		cmds = append(cmds, struct {
+			Command string
+			Reason  string
+		}{targetService.LogCommand, fmt.Sprintf("Get recent %s logs", targetService.Name)})
 
-Pick the EXACT log command from LIVE STATUS. Also check:
-- Service status: systemctl status <name> OR systemctl --user status <name>
-- Recent errors in logs (use grep -i error or grep -i fail)
-- Resource usage: free -h; df -h
-- Process state: ps aux | grep <name>
-
-Output ONLY a JSON array. Example:
-[
-  {"command":"journalctl --user -u trendboard -n 200 --no-pager","machine_id":"machine-123","reason":"Get recent trendboard logs"},
-  {"command":"systemctl --user status trendboard","machine_id":"machine-123","reason":"Check service status"},
-  {"command":"free -h; df -h","machine_id":"machine-123","reason":"Check system resources"}
-]
-
-`)
-
-	// Add machines with live context
-	if len(machines) > 0 {
-		sb.WriteString("MACHINES AND LIVE STATUS:\n")
-		for _, m := range machines {
-			status := m.Status
-			if status == "" {
-				status = "unknown"
-			}
-			sb.WriteString(fmt.Sprintf("\n[%s] IP:%s ID:%s Status:%s\n", m.Name, m.IP, m.ID, status))
-			if ctx, ok := liveContext[m.ID]; ok && ctx != "" {
-				sb.WriteString(ctx)
-				sb.WriteString("\n")
-			}
+		switch targetService.Type {
+		case "docker":
+			cmds = append(cmds, struct {
+				Command string
+				Reason  string
+			}{fmt.Sprintf("docker inspect --format '{{.State.Status}} started:{{.State.StartedAt}}' %s", targetService.Name),
+				fmt.Sprintf("Check %s container state", targetService.Name)})
+			cmds = append(cmds, struct {
+				Command string
+				Reason  string
+			}{fmt.Sprintf("docker stats --no-stream --format 'CPU:{{.CPUPerc}} MEM:{{.MemUsage}}' %s", targetService.Name),
+				fmt.Sprintf("Check %s resource usage", targetService.Name)})
+		case "user":
+			cmds = append(cmds, struct {
+				Command string
+				Reason  string
+			}{fmt.Sprintf("systemctl --user status %s", targetService.Name),
+				fmt.Sprintf("Check %s service status", targetService.Name)})
+			cmds = append(cmds, struct {
+				Command string
+				Reason  string
+			}{fmt.Sprintf("journalctl --user -u %s --since '1 hour ago' --no-pager | grep -i -E 'error|fail|panic|fatal|exception' | tail -20", targetService.Name),
+				fmt.Sprintf("Find errors in %s logs", targetService.Name)})
+		case "system":
+			cmds = append(cmds, struct {
+				Command string
+				Reason  string
+			}{fmt.Sprintf("systemctl status %s", targetService.Name),
+				fmt.Sprintf("Check %s service status", targetService.Name)})
+			cmds = append(cmds, struct {
+				Command string
+				Reason  string
+			}{fmt.Sprintf("journalctl -u %s --since '1 hour ago' --no-pager | grep -i -E 'error|fail|panic|fatal|exception' | tail -20", targetService.Name),
+				fmt.Sprintf("Find errors in %s logs", targetService.Name)})
 		}
 	}
 
-	return sb.String()
+	// General health checks
+	cmds = append(cmds, struct {
+		Command string
+		Reason  string
+	}{"free -h; df -h /", "Check memory and disk usage"})
+
+	return cmds
+}
+
+// cleanCommandOutput removes noise from command output
+func cleanCommandOutput(output string) string {
+	if idx := strings.LastIndex(output, "EXIT_CODE:"); idx != -1 {
+		output = strings.TrimSpace(output[:idx])
+	}
+	if idx := strings.Index(output, "[sudo] password for"); idx != -1 {
+		if nl := strings.Index(output[idx:], "\n"); nl != -1 {
+			output = strings.TrimSpace(output[idx+nl:])
+		}
+	}
+	if len(output) > 3000 {
+		output = output[len(output)-3000:]
+	}
+	return output
 }
 
 // buildAnalysisPrompt creates the prompt for analyzing collected data
 func buildAnalysisPrompt() string {
-	return `You are Porter AI analyzing debug data. Given the investigation results below, provide:
+	return `Analyze these debug results. Be concise and specific. Format:
 
-1. **Status**: Is the service healthy or unhealthy?
-2. **Issues Found**: List any errors, warnings, or problems found in the logs/output
-3. **Root Cause**: What is likely causing the issue?
-4. **Recommendation**: What should be done to fix it?
+**Status**: healthy/unhealthy
+**Issues**: list errors found in logs (quote actual lines)
+**Cause**: likely root cause
+**Fix**: recommended action
 
-Be specific - reference actual error messages and log lines. Be concise but thorough.`
-}
-
-// parseDebugCommands extracts the JSON command array from LLM response
-func parseDebugCommands(response string, allMachines []*Machine) []debugCommand {
-	// Try to find JSON array in response
-	response = strings.TrimSpace(response)
-
-	// Find array boundaries
-	start := strings.Index(response, "[")
-	end := strings.LastIndex(response, "]")
-	if start == -1 || end == -1 || end <= start {
-		return nil
-	}
-
-	jsonStr := response[start : end+1]
-
-	var commands []debugCommand
-	if err := json.Unmarshal([]byte(jsonStr), &commands); err != nil {
-		return nil
-	}
-
-	// Fix machine IDs
-	for i := range commands {
-		fixed := fixMachineIDs([]string{commands[i].MachineID}, allMachines)
-		if len(fixed) > 0 {
-			commands[i].MachineID = fixed[0]
-		}
-	}
-
-	return commands
+If no errors found, say the service appears healthy.`
 }
 
 // AIAgentDebugRoutes sets up the debug endpoint
@@ -171,9 +191,9 @@ func AIAgentDebugRoutes(r *mux.Router) {
 		}
 
 		// Get all machines
-		machines := machineRepo.List()
+		allMachines := machineRepo.List()
 
-		// Resolve machines from request + message
+		// Resolve target machines
 		var targetMachines []*Machine
 		seen := make(map[string]bool)
 		if len(debugReq.MachineIDs) > 0 {
@@ -184,7 +204,7 @@ func AIAgentDebugRoutes(r *mux.Router) {
 				}
 			}
 		}
-		mentioned := resolveMachinesFromMessage(debugReq.Message, machines)
+		mentioned := resolveMachinesFromMessage(debugReq.Message, allMachines)
 		for _, m := range mentioned {
 			if !seen[m.ID] {
 				targetMachines = append(targetMachines, m)
@@ -192,103 +212,80 @@ func AIAgentDebugRoutes(r *mux.Router) {
 			}
 		}
 		if len(targetMachines) == 0 {
-			targetMachines = machines
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "No target machines identified. Mention a machine IP or name.",
+			})
+			return
 		}
 
-		// Gather live context
+		// PHASE 1: Gather live context (fast, cached)
 		liveContext := gatherContextForMachines(targetMachines)
 
-		// PHASE 1: Ask LLM what commands to run
-		debugSystemPrompt := buildDebugPrompt(config, targetMachines, liveContext)
-		planMessages := []ChatMessage{
-			{Role: "system", Content: debugSystemPrompt},
-			{Role: "user", Content: debugReq.Message},
+		// PHASE 2: Build investigation commands programmatically (no LLM needed)
+		type machineCmd struct {
+			Machine *Machine
+			Command string
+			Reason  string
+		}
+		var allCmds []machineCmd
+
+		for _, m := range targetMachines {
+			ctx := liveContext[m.ID]
+			services := parseServicesFromContext(ctx)
+			targetSvc := extractServiceName(debugReq.Message, services)
+
+			cmds := buildDebugCommands(targetSvc, m)
+			for _, cmd := range cmds {
+				allCmds = append(allCmds, machineCmd{Machine: m, Command: cmd.Command, Reason: cmd.Reason})
+			}
 		}
 
-		planResponse, _, err := callLLM(config, planMessages)
-		if err != nil {
+		if len(allCmds) == 0 {
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": fmt.Sprintf("LLM error: %v", err),
+				"error": "Could not determine what to investigate. Please be more specific.",
 			})
 			return
 		}
 
-		commands := parseDebugCommands(planResponse, machines)
-		if len(commands) == 0 {
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error":   "Could not generate investigation plan",
-				"raw":     planResponse,
-			})
-			return
-		}
+		// PHASE 3: Execute commands concurrently
+		steps := make([]DebugStep, len(allCmds))
+		var wg sync.WaitGroup
 
-		// Cap at 8 commands to avoid runaway
-		if len(commands) > 8 {
-			commands = commands[:8]
-		}
-
-		// PHASE 2: Execute commands and collect results
-		var steps []DebugStep
-		var investigationLog strings.Builder
-		investigationLog.WriteString(fmt.Sprintf("Investigation: %s\n\n", debugReq.Message))
-
-		for i, cmd := range commands {
-			step := DebugStep{
+		for i, mc := range allCmds {
+			steps[i] = DebugStep{
 				Step:    i + 1,
-				Action:  cmd.Reason,
-				Command: cmd.Command,
+				Action:  mc.Reason,
+				Command: mc.Command,
+				Machine: mc.Machine.Name,
 			}
-
-			// Only auto-execute read-only commands
-			if !isReadOnlyCommand(cmd.Command) {
-				step.Error = "Skipped: command is not read-only"
-				steps = append(steps, step)
-				continue
-			}
-
-			machine, exists := machineRepo.Get(cmd.MachineID)
-			if !exists {
-				step.Error = "Machine not found: " + cmd.MachineID
-				steps = append(steps, step)
-				continue
-			}
-			step.Machine = machine.Name
-
-			// Detect user-scoped commands
-			useSudo := false
-			if strings.Contains(cmd.Command, "--user") {
-				useSudo = false
-			}
-
-			result := runCommandOnMachine(machine, cmd.Command, useSudo)
-
-			output := result.Output
-			if idx := strings.LastIndex(output, "EXIT_CODE:"); idx != -1 {
-				output = strings.TrimSpace(output[:idx])
-			}
-			// Remove sudo password prompts
-			if idx := strings.Index(output, "[sudo] password for"); idx != -1 {
-				if nl := strings.Index(output[idx:], "\n"); nl != -1 {
-					output = strings.TrimSpace(output[idx+nl:])
+			wg.Add(1)
+			go func(idx int, m *Machine, cmd string) {
+				defer wg.Done()
+				useSudo := !strings.Contains(cmd, "--user")
+				result := runCommandOnMachine(m, cmd, useSudo)
+				steps[idx].Output = cleanCommandOutput(result.Output)
+				if !result.Success {
+					steps[idx].Error = result.Error
 				}
-			}
-
-			// Truncate very long outputs
-			if len(output) > 3000 {
-				output = output[len(output)-3000:]
-			}
-
-			step.Output = output
-			if !result.Success {
-				step.Error = result.Error
-			}
-			steps = append(steps, step)
-
-			investigationLog.WriteString(fmt.Sprintf("--- Step %d: %s ---\nCommand: %s\nMachine: %s\n%s\n\n",
-				i+1, cmd.Reason, cmd.Command, machine.Name, output))
+			}(i, mc.Machine, mc.Command)
 		}
 
-		// PHASE 3: Feed results to LLM for analysis
+		// Wait with timeout
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+		}
+
+		// PHASE 4: Build investigation log and send to LLM for analysis
+		var investigationLog strings.Builder
+		investigationLog.WriteString(fmt.Sprintf("Debug: %s\n\n", debugReq.Message))
+		for _, step := range steps {
+			investigationLog.WriteString(fmt.Sprintf("--- %s (%s) ---\n$ %s\n%s\n\n",
+				step.Action, step.Machine, step.Command, step.Output))
+		}
+
 		analysisMessages := []ChatMessage{
 			{Role: "system", Content: buildAnalysisPrompt()},
 			{Role: "user", Content: investigationLog.String()},
