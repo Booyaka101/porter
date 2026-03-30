@@ -316,6 +316,29 @@ func isHealthOverviewQuery(message string) bool {
 	return hasHealth && hasBroad
 }
 
+// needsMachineContext returns true if the message appears to be about infrastructure,
+// machines, services, or anything that would benefit from live SSH context.
+// Returns false for general knowledge questions, greetings, etc.
+func needsMachineContext(message string) bool {
+	msg := strings.ToLower(message)
+	infraWords := []string{
+		"machine", "server", "docker", "container", "service", "systemd", "systemctl",
+		"memory", "disk", "cpu", "load", "uptime", "restart", "deploy", "log", "logs",
+		"health", "status", "running", "stopped", "failed", "error", "crash",
+		"network", "port", "ssh", "process", "kill", "install", "update", "upgrade",
+		"nginx", "apache", "postgres", "mysql", "redis", "mongo",
+	}
+	for _, w := range infraWords {
+		if strings.Contains(msg, w) {
+			return true
+		}
+	}
+	if ipRegex.MatchString(msg) {
+		return true
+	}
+	return false
+}
+
 // buildHealthOverview creates a server-side formatted health report (no LLM needed)
 func buildHealthOverview(machines []*Machine, liveContext map[string]string) string {
 	var sb strings.Builder
@@ -959,47 +982,50 @@ func AIAgentRoutes(r *mux.Router) {
 			return
 		}
 
-		// Determine which machines to gather context for:
-		// 1. Explicitly selected machines from UI
-		// 2. Machines mentioned by IP or name in the user's message
-		// 3. Fall back to all machines
+		// Determine which machines to gather context for
 		var contextMachines []*Machine
+		focusedIDs := make(map[string]bool)
+
 		if len(chatReq.MachineIDs) > 0 {
+			seen := make(map[string]bool)
 			for _, id := range chatReq.MachineIDs {
-				if m, ok := machineRepo.Get(id); ok {
+				if m, ok := machineRepo.Get(id); ok && !seen[m.ID] {
 					contextMachines = append(contextMachines, m)
+					seen[m.ID] = true
+					focusedIDs[m.ID] = true
 				}
 			}
-		}
-		// Also resolve machines mentioned in the user's message
-		mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
-		seen := make(map[string]bool)
-		focusedIDs := make(map[string]bool)
-		for _, m := range contextMachines {
-			seen[m.ID] = true
-			focusedIDs[m.ID] = true
-		}
-		for _, m := range mentioned {
-			if !seen[m.ID] {
-				contextMachines = append(contextMachines, m)
-				seen[m.ID] = true
+			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
+			for _, m := range mentioned {
+				if !seen[m.ID] {
+					contextMachines = append(contextMachines, m)
+					seen[m.ID] = true
+				}
+				focusedIDs[m.ID] = true
 			}
-			focusedIDs[m.ID] = true
-		}
-		// If no machines resolved, gather context from all online machines
-		if len(contextMachines) == 0 {
-			contextMachines = machines
+		} else {
+			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
+			if len(mentioned) > 0 {
+				seen := make(map[string]bool)
+				for _, m := range mentioned {
+					if !seen[m.ID] {
+						contextMachines = append(contextMachines, m)
+						seen[m.ID] = true
+						focusedIDs[m.ID] = true
+					}
+				}
+			} else if needsMachineContext(chatReq.Message) {
+				contextMachines = machines
+			}
 		}
 
-		// Gather live context from resolved machines via SSH
-		liveContext := gatherContextForMachines(contextMachines)
+		// Gather live context only if we have machines to query
+		liveContext := make(map[string]string)
+		if len(contextMachines) > 0 {
+			liveContext = gatherContextForMachines(contextMachines)
+		}
 
-		// Build conversation with system prompt
-		// focusedIDs = machines user specifically asked about (get full context)
-		// Others get compact one-line health summary
 		var messages []ChatMessage
-
-		// Add system prompt
 		systemPrompt := buildSystemPrompt(config, machines, liveContext, focusedIDs)
 		messages = append(messages, ChatMessage{
 			Role:    "system",
