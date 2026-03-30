@@ -590,7 +590,8 @@ const AIAgent = () => {
                             {[
                                 'What scripts are available?',
                                 'Show me the status of all machines',
-                                'Debug trendboard on 10.0.5.29',
+                                'Check disk and memory usage',
+                                'Investigate network connectivity',
                             ].map((suggestion, i) => (
                                 <Chip
                                     key={i}
