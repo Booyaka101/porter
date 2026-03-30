@@ -428,18 +428,27 @@ func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext m
 Do NOT include IP addresses in your responses. Use machine display names only.
 Current server time: %s
 
-RULES:
-1. For general questions (time, date, explanations, advice, concepts): Answer DIRECTLY in plain text. NO JSON action blocks. You know the current time (shown above).
-2. For health/status questions: Answer DIRECTLY using the machine data below. NO JSON action blocks.
-3. ONLY for explicit action requests (run, restart, check logs, deploy, execute): Give a short explanation, then ONE JSON action block with the REAL machine ID from the list below.
-4. For systemd services: The SERVICES section shows the EXACT command for each service. User-level services show "journalctl --user -u", system services show "journalctl -u". COPY the exact command shown - do NOT change the flags.
-5. NEVER use placeholder values like "MACHINE_ID" or "MACHINE_ID_FROM_BELOW". Always use the actual ID from the machine list.
-6. If the user does not mention a specific machine, do NOT suggest running commands. Just answer the question.
+WHEN TO USE JSON ACTION BLOCKS:
+- ONLY when the user explicitly asks to run a command, check logs, restart something, or execute an action on a specific machine.
+- NEVER for questions, explanations, time, health status, or general chat.
 
-JSON FORMAT (ONLY for rule 3 - explicit action requests):
-`, time.Now().Format("Mon Jan 2 15:04:05 MST 2006")) + "```" + `json
-{"type":"run_command","command":"actual_command_here","machine_ids":["actual-machine-id-here"]}
-` + "```" + `
+WHEN NOT TO USE JSON:
+- "what time is it" -> answer with the server time shown above
+- "what is running on X" -> describe what you see in the machine data
+- "how much disk space" -> answer from the machine data
+- Any general question -> answer directly in plain text
+
+SYSTEMD SERVICES:
+- The SERVICES section below shows exact log commands. User-level services use "journalctl --user -u", system services use "journalctl -u". Copy the exact command shown.
+
+EXAMPLE - user says "show me logs for myapp on ServerA" (ServerA has ID abc123):
+`+"```"+`json
+{"type":"run_command","command":"docker logs myapp --tail 100","machine_ids":["abc123"]}
+`+"```"+`
+
+EXAMPLE - user says "what time is it":
+The current server time is %s
+`, time.Now().Format("Mon Jan 2 15:04:05 MST 2006"), time.Now().Format("Mon Jan 2 15:04:05 MST 2006")) + `
 `)
 
 	// Add scripts
