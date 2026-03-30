@@ -1053,10 +1053,23 @@ func AIAgentRoutes(r *mux.Router) {
 			messages = append(messages, msg)
 		}
 
+		// Enrich user message: replace IPs with machine name+ID hints so the LLM can connect them
+		enrichedMessage := chatReq.Message
+		if ips := ipRegex.FindAllString(chatReq.Message, -1); len(ips) > 0 {
+			for _, ip := range ips {
+				for _, m := range machines {
+					if m.IP == ip {
+						enrichedMessage = strings.ReplaceAll(enrichedMessage, ip, fmt.Sprintf("%s (ID: %s)", m.Name, m.ID))
+						break
+					}
+				}
+			}
+		}
+
 		// Add current message
 		userMessage := ChatMessage{
 			Role:      "user",
-			Content:   chatReq.Message,
+			Content:   enrichedMessage,
 			Timestamp: time.Now(),
 		}
 		messages = append(messages, userMessage)
