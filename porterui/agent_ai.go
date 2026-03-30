@@ -223,16 +223,89 @@ func gatherContextForMachines(machines []*Machine) map[string]string {
 	return results
 }
 
+// healthSummary holds parsed health data for a machine
+type healthSummary struct {
+	Uptime string
+	Memory string
+	Disk   string
+	Docker string
+}
+
+// parseHealthFromContext extracts structured health info from raw SSH context
+func parseHealthFromContext(ctx string) healthSummary {
+	var h healthSummary
+	inHealth := false
+	inDocker := false
+	var dockerLines []string
+	for _, line := range strings.Split(ctx, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "HEALTH:" {
+			inHealth = true
+			inDocker = false
+			continue
+		}
+		if line == "DOCKER:" {
+			inHealth = false
+			inDocker = true
+			continue
+		}
+		if line == "SERVICES:" {
+			inDocker = false
+			break
+		}
+		if inHealth && line != "" {
+			if strings.HasPrefix(line, "up ") || strings.Contains(line, "load average") {
+				h.Uptime = line
+			} else if strings.HasPrefix(line, "Memory:") {
+				h.Memory = line
+			} else if strings.HasPrefix(line, "Disk") {
+				h.Disk = line
+			}
+		}
+		if inDocker && line != "" {
+			dockerLines = append(dockerLines, line)
+		}
+	}
+	if len(dockerLines) > 0 {
+		healthy := 0
+		unhealthy := 0
+		stopped := 0
+		for _, dl := range dockerLines {
+			lower := strings.ToLower(dl)
+			if strings.Contains(lower, "(healthy)") || strings.Contains(lower, "up ") {
+				healthy++
+			}
+			if strings.Contains(lower, "(unhealthy)") {
+				unhealthy++
+			}
+			if strings.Contains(lower, "exited") {
+				stopped++
+			}
+		}
+		parts := []string{fmt.Sprintf("%d running", healthy)}
+		if unhealthy > 0 {
+			parts = append(parts, fmt.Sprintf("%d unhealthy", unhealthy))
+		}
+		if stopped > 0 {
+			parts = append(parts, fmt.Sprintf("%d stopped", stopped))
+		}
+		h.Docker = strings.Join(parts, ", ")
+	}
+	return h
+}
+
 // buildSystemPrompt creates a context-aware system prompt with live machine data
-func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string) string {
+// focusedMachineIDs: machines the user specifically asked about (get full context)
+// If empty, all machines get compact summary only
+func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string, focusedMachineIDs map[string]bool) string {
 	var sb strings.Builder
 
 	sb.WriteString(`You are Porter AI, an infrastructure assistant. Be concise.
+Do NOT include IP addresses in your responses. Use machine names only.
 
 Always: short explanation first, then JSON action block.
 
 Each service in LIVE STATUS has its exact log command after "logs:". USE THAT EXACT COMMAND.
-For health: top -b -n 1 | head -15; free -h; df -h
 
 JSON FORMAT (use EXACTLY, only replace command and machine ID):
 ` + "```" + `json
@@ -251,22 +324,46 @@ JSON FORMAT (use EXACTLY, only replace command and machine ID):
 		sb.WriteString("\n\n")
 	}
 
-	// Add machines with live context
+	// Add machines
 	if len(machines) > 0 {
-		sb.WriteString("MACHINES AND LIVE STATUS:\n")
+		sb.WriteString("MACHINES:\n")
 		for _, m := range machines {
 			status := m.Status
 			if status == "" {
 				status = "unknown"
 			}
-			sb.WriteString(fmt.Sprintf("\n[%s] IP:%s ID:%s Status:%s\n", m.Name, m.IP, m.ID, status))
-			if len(m.Tags) > 0 {
-				sb.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(m.Tags, ", ")))
-			}
-			// Add live context if available
-			if ctx, ok := liveContext[m.ID]; ok && ctx != "" {
+
+			ctx, hasCtx := liveContext[m.ID]
+			isFocused := focusedMachineIDs[m.ID]
+
+			if isFocused && hasCtx {
+				// Full context for specifically mentioned machines
+				sb.WriteString(fmt.Sprintf("\n[%s] ID:%s Status:%s\n", m.Name, m.ID, status))
+				if len(m.Tags) > 0 {
+					sb.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(m.Tags, ", ")))
+				}
 				sb.WriteString(ctx)
 				sb.WriteString("\n")
+			} else if hasCtx {
+				// Compact one-line summary for other machines
+				h := parseHealthFromContext(ctx)
+				sb.WriteString(fmt.Sprintf("[%s] ID:%s Status:%s", m.Name, m.ID, status))
+				if h.Uptime != "" {
+					sb.WriteString(" | " + h.Uptime)
+				}
+				if h.Memory != "" {
+					sb.WriteString(" | " + h.Memory)
+				}
+				if h.Disk != "" {
+					sb.WriteString(" | " + h.Disk)
+				}
+				if h.Docker != "" {
+					sb.WriteString(" | Docker: " + h.Docker)
+				}
+				sb.WriteString("\n")
+			} else {
+				// No context (offline/unreachable)
+				sb.WriteString(fmt.Sprintf("[%s] ID:%s Status:%s\n", m.Name, m.ID, status))
 			}
 		}
 	}
@@ -759,16 +856,19 @@ func AIAgentRoutes(r *mux.Router) {
 		// Also resolve machines mentioned in the user's message
 		mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
 		seen := make(map[string]bool)
+		focusedIDs := make(map[string]bool)
 		for _, m := range contextMachines {
 			seen[m.ID] = true
+			focusedIDs[m.ID] = true
 		}
 		for _, m := range mentioned {
 			if !seen[m.ID] {
 				contextMachines = append(contextMachines, m)
 				seen[m.ID] = true
 			}
+			focusedIDs[m.ID] = true
 		}
-		// If no machines resolved, use all
+		// If no machines resolved, gather context from all online machines
 		if len(contextMachines) == 0 {
 			contextMachines = machines
 		}
@@ -777,10 +877,12 @@ func AIAgentRoutes(r *mux.Router) {
 		liveContext := gatherContextForMachines(contextMachines)
 
 		// Build conversation with system prompt
+		// focusedIDs = machines user specifically asked about (get full context)
+		// Others get compact one-line health summary
 		var messages []ChatMessage
 
 		// Add system prompt
-		systemPrompt := buildSystemPrompt(config, machines, liveContext)
+		systemPrompt := buildSystemPrompt(config, machines, liveContext, focusedIDs)
 		messages = append(messages, ChatMessage{
 			Role:    "system",
 			Content: systemPrompt,
