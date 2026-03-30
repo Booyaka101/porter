@@ -294,6 +294,107 @@ func parseHealthFromContext(ctx string) healthSummary {
 	return h
 }
 
+// isHealthOverviewQuery detects broad health/status queries about all machines
+func isHealthOverviewQuery(message string) bool {
+	msg := strings.ToLower(message)
+	healthWords := []string{"health", "status", "overview", "how are", "check all", "all machines", "every machine", "machine status", "system status"}
+	broadWords := []string{"all", "every", "general", "overall", "machines", "fleet", "infrastructure"}
+	hasHealth := false
+	hasBroad := false
+	for _, w := range healthWords {
+		if strings.Contains(msg, w) {
+			hasHealth = true
+			break
+		}
+	}
+	for _, w := range broadWords {
+		if strings.Contains(msg, w) {
+			hasBroad = true
+			break
+		}
+	}
+	return hasHealth && hasBroad
+}
+
+// buildHealthOverview creates a server-side formatted health report (no LLM needed)
+func buildHealthOverview(machines []*Machine, liveContext map[string]string) string {
+	var sb strings.Builder
+
+	var online, offline, unknown int
+	type machineHealth struct {
+		Name   string
+		Status string
+		Health healthSummary
+	}
+	var onlineMachines, offlineMachines, unknownMachines []machineHealth
+
+	for _, m := range machines {
+		status := m.Status
+		if status == "" {
+			status = "unknown"
+		}
+		mh := machineHealth{Name: m.Name, Status: status}
+
+		if ctx, ok := liveContext[m.ID]; ok && ctx != "" {
+			mh.Health = parseHealthFromContext(ctx)
+		}
+
+		switch status {
+		case "online":
+			online++
+			onlineMachines = append(onlineMachines, mh)
+		case "offline":
+			offline++
+			offlineMachines = append(offlineMachines, mh)
+		default:
+			unknown++
+			unknownMachines = append(unknownMachines, mh)
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("## Machine Health Overview\n\n**%d online** | **%d offline** | **%d unknown** (of %d total)\n\n",
+		online, offline, unknown, len(machines)))
+
+	if len(onlineMachines) > 0 {
+		sb.WriteString("### Online Machines\n")
+		for _, mh := range onlineMachines {
+			sb.WriteString(fmt.Sprintf("- **%s**", mh.Name))
+			if mh.Health.Memory != "" {
+				sb.WriteString(" | " + mh.Health.Memory)
+			}
+			if mh.Health.Disk != "" {
+				sb.WriteString(" | " + mh.Health.Disk)
+			}
+			if mh.Health.Uptime != "" {
+				sb.WriteString(" | " + mh.Health.Uptime)
+			}
+			if mh.Health.Docker != "" {
+				sb.WriteString(" | Docker: " + mh.Health.Docker)
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(offlineMachines) > 0 {
+		sb.WriteString("### Offline Machines\n")
+		for _, mh := range offlineMachines {
+			sb.WriteString(fmt.Sprintf("- **%s**\n", mh.Name))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(unknownMachines) > 0 {
+		sb.WriteString("### Unknown Status\n")
+		for _, mh := range unknownMachines {
+			sb.WriteString(fmt.Sprintf("- **%s**\n", mh.Name))
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
 // buildSystemPrompt creates a context-aware system prompt with live machine data
 // focusedMachineIDs: machines the user specifically asked about (get full context)
 // If empty, all machines get compact summary only
@@ -841,6 +942,18 @@ func AIAgentRoutes(r *mux.Router) {
 
 		// Get machines for context
 		machines := machineRepo.List()
+
+		// Fast path: health overview queries answered server-side (no LLM)
+		if isHealthOverviewQuery(chatReq.Message) {
+			liveContext := gatherContextForMachines(machines)
+			summary := buildHealthOverview(machines, liveContext)
+			json.NewEncoder(w).Encode(ChatResponse{
+				Message:   summary,
+				SessionID: sessionID,
+				Timestamp: time.Now(),
+			})
+			return
+		}
 
 		// Determine which machines to gather context for:
 		// 1. Explicitly selected machines from UI
