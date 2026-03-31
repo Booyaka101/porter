@@ -157,7 +157,7 @@ func warmContextCache() {
 	if len(machines) == 0 {
 		return
 	}
-	gatherContextForMachines(machines)
+	gatherContextForMachinesWithPriority(machines, false)
 }
 
 func SetAIAgentConfig(config *AIAgentConfig) {
@@ -175,12 +175,13 @@ func GetAIAgentConfig() *AIAgentConfig {
 // ---------- Context gathering ----------
 
 var (
-	liveContextCache     = make(map[string]string)
-	liveContextCacheLock sync.RWMutex
-	liveContextCacheTTL  = make(map[string]time.Time)
-	ipRegex              = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
-	sshSemaphore         = make(chan struct{}, 10)
-	cleanupOnce          sync.Once
+	liveContextCache      = make(map[string]string)
+	liveContextCacheLock  sync.RWMutex
+	liveContextCacheTTL   = make(map[string]time.Time)
+	ipRegex               = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
+	sshSemaphore          = make(chan struct{}, 10)          // High-priority for HTTP handlers
+	bgSshSemaphore        = make(chan struct{}, 2)           // Low-priority for background tasks
+	cleanupOnce           sync.Once
 )
 
 func resolveMachinesFromMessage(message string, allMachines []*Machine) []*Machine {
@@ -264,12 +265,30 @@ func gatherMachineContext(m *Machine) string {
 }
 
 func gatherContextForMachines(machines []*Machine) map[string]string {
+	return gatherContextForMachinesWithPriority(machines, true)
+}
+
+func gatherContextForMachinesWithPriority(machines []*Machine, highPriority bool) map[string]string {
 	results := make(map[string]string)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Use shorter timeout to prevent hangs
+	var timeout time.Duration
+	if highPriority {
+		timeout = 5 * time.Second
+	} else {
+		timeout = 3 * time.Second // Background tasks get even shorter timeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	var sem chan struct{}
+	if highPriority {
+		sem = sshSemaphore
+	} else {
+		sem = bgSshSemaphore
+	}
 
 	for _, m := range machines {
 		if m.Status != "online" && m.Status != "" {
@@ -279,10 +298,14 @@ func gatherContextForMachines(machines []*Machine) map[string]string {
 		go func(machine *Machine) {
 			defer wg.Done()
 
+			// Non-blocking semaphore acquire
 			select {
-			case sshSemaphore <- struct{}{}:
-				defer func() { <-sshSemaphore }()
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
 			case <-ctx.Done():
+				return
+			default:
+				// Semaphore full, skip to prevent hang
 				return
 			}
 
