@@ -674,26 +674,52 @@ The current server time is %s
 	return sb.String()
 }
 
-// callLLM sends a request to the configured LLM provider
-func callLLM(ctx context.Context, config *AIAgentConfig, messages []ChatMessage) (string, int, error) {
-	apiKey := config.APIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("PORTER_AI_API_KEY")
-	}
+// allowedLocalHosts defines hostnames/IPs considered local for LLM connections
+var allowedLocalHosts = map[string]bool{
+	"localhost":            true,
+	"127.0.0.1":            true,
+	"host.docker.internal": true,
+	"0.0.0.0":              true,
+	"::1":                  true,
+}
 
+// isLocalURL checks if a URL points to a local address
+func isLocalURL(rawURL string) bool {
+	if rawURL == "" {
+		return true // empty defaults to localhost
+	}
+	// Extract host from URL (strip scheme and port)
+	host := rawURL
+	if idx := strings.Index(host, "://"); idx != -1 {
+		host = host[idx+3:]
+	}
+	if idx := strings.Index(host, "/"); idx != -1 {
+		host = host[:idx]
+	}
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	if allowedLocalHosts[host] {
+		return true
+	}
+	// Allow 10.x.x.x private network (same LAN)
+	if strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "172.") {
+		return true
+	}
+	return false
+}
+
+// callLLM sends a request to the configured LLM provider.
+// Only local providers (Ollama) are allowed — external API calls are blocked.
+func callLLM(ctx context.Context, config *AIAgentConfig, messages []ChatMessage) (string, int, error) {
 	switch config.Provider {
-	case "openai":
-		if apiKey == "" {
-			return "", 0, fmt.Errorf("AI API key not configured. Set PORTER_AI_API_KEY environment variable or configure in wrapper")
-		}
-		return callOpenAI(ctx, config, messages, apiKey)
-	case "anthropic":
-		if apiKey == "" {
-			return "", 0, fmt.Errorf("AI API key not configured. Set PORTER_AI_API_KEY environment variable or configure in wrapper")
-		}
-		return callAnthropic(ctx, config, messages, apiKey)
 	case "ollama":
+		if !isLocalURL(config.BaseURL) {
+			return "", 0, fmt.Errorf("security: Ollama BaseURL %q is not a local address", config.BaseURL)
+		}
 		return callOllama(ctx, config, messages)
+	case "openai", "anthropic":
+		return "", 0, fmt.Errorf("security: external LLM providers (%s) are disabled — only local Ollama is allowed", config.Provider)
 	default:
 		return "", 0, fmt.Errorf("unsupported AI provider: %s", config.Provider)
 	}
