@@ -576,6 +576,132 @@ func buildHealthOverview(machines []*Machine, liveContext map[string]string) str
 	return sb.String()
 }
 
+// isMachineInfoQuery detects queries asking about a specific machine
+func isMachineInfoQuery(message string) bool {
+	msg := strings.ToLower(message)
+	infoPatterns := []string{
+		"tell me about", "tell me more about", "info on", "info about",
+		"information on", "information about", "details on", "details about",
+		"what is running on", "what's running on", "whats running on",
+		"show me", "describe", "more about", "full info",
+	}
+	for _, p := range infoPatterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildMachineDetail creates a detailed server-side report for a specific machine
+func buildMachineDetail(m *Machine, ctx string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("## %s\n\n", m.Name))
+
+	status := m.Status
+	if status == "" {
+		status = "unknown"
+	}
+	sb.WriteString(fmt.Sprintf("**Status:** %s\n", status))
+	if len(m.Tags) > 0 {
+		sb.WriteString(fmt.Sprintf("**Tags:** %s\n", strings.Join(m.Tags, ", ")))
+	}
+	sb.WriteString("\n")
+
+	if ctx == "" {
+		sb.WriteString("*No live data available — machine may be offline or unreachable.*\n")
+		return sb.String()
+	}
+
+	// Parse sections
+	inHealth := false
+	inDocker := false
+	inServices := false
+	var healthLines, dockerLines, serviceLines []string
+
+	for _, line := range strings.Split(ctx, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "HEALTH:" {
+			inHealth = true
+			inDocker = false
+			inServices = false
+			continue
+		}
+		if trimmed == "DOCKER:" {
+			inHealth = false
+			inDocker = true
+			inServices = false
+			continue
+		}
+		if trimmed == "SERVICES:" {
+			inHealth = false
+			inDocker = false
+			inServices = true
+			continue
+		}
+		if trimmed == "" {
+			continue
+		}
+		if inHealth {
+			healthLines = append(healthLines, trimmed)
+		}
+		if inDocker {
+			dockerLines = append(dockerLines, trimmed)
+		}
+		if inServices {
+			serviceLines = append(serviceLines, trimmed)
+		}
+	}
+
+	// Health
+	if len(healthLines) > 0 {
+		sb.WriteString("### Health\n")
+		for _, l := range healthLines {
+			sb.WriteString(fmt.Sprintf("- %s\n", l))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Docker containers
+	if len(dockerLines) > 0 {
+		sb.WriteString("### Docker Containers\n")
+		for _, l := range dockerLines {
+			parts := strings.SplitN(l, "\t", 2)
+			if len(parts) == 2 {
+				sb.WriteString(fmt.Sprintf("- **%s** — %s\n", parts[0], parts[1]))
+			} else {
+				sb.WriteString(fmt.Sprintf("- %s\n", l))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Services
+	if len(serviceLines) > 0 {
+		sb.WriteString("### Services\n")
+		for _, l := range serviceLines {
+			// Extract service name and type tag
+			name := l
+			svcType := ""
+			if idx := strings.Index(l, " ["); idx != -1 {
+				name = l[:idx]
+				endIdx := strings.Index(l[idx:], "]")
+				if endIdx != -1 {
+					svcType = l[idx+2 : idx+endIdx]
+				}
+			}
+			if svcType != "" {
+				sb.WriteString(fmt.Sprintf("- **%s** (%s)\n", name, svcType))
+			} else {
+				sb.WriteString(fmt.Sprintf("- %s\n", name))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
 // buildSystemPrompt creates a context-aware system prompt with live machine data
 // focusedMachineIDs: machines the user specifically asked about (get full context)
 // If empty, all machines get compact summary only
@@ -1273,6 +1399,44 @@ func AIAgentRoutes(r *mux.Router) {
 				Timestamp: time.Now(),
 			})
 			return
+		}
+
+		// Fast path: machine info queries ("tell me about X", "what's running on X")
+		if isMachineInfoQuery(chatReq.Message) {
+			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
+			var targetMachines []*Machine
+			if len(chatReq.MachineIDs) > 0 {
+				for _, id := range chatReq.MachineIDs {
+					if m, ok := machineRepo.Get(id); ok {
+						targetMachines = append(targetMachines, m)
+					}
+				}
+			}
+			for _, m := range mentioned {
+				found := false
+				for _, existing := range targetMachines {
+					if existing.ID == m.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					targetMachines = append(targetMachines, m)
+				}
+			}
+			if len(targetMachines) > 0 {
+				liveContext := gatherContextForMachines(targetMachines)
+				var sb strings.Builder
+				for _, m := range targetMachines {
+					sb.WriteString(buildMachineDetail(m, liveContext[m.ID]))
+				}
+				json.NewEncoder(w).Encode(ChatResponse{
+					Message:   sb.String(),
+					SessionID: sessionID,
+					Timestamp: time.Now(),
+				})
+				return
+			}
 		}
 
 		// Determine which machines to gather context for
