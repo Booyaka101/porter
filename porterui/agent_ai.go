@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -488,6 +489,15 @@ func isTimeQuery(message string) bool {
 	return false
 }
 
+// isScriptsQuery detects queries asking about available scripts
+func isScriptsQuery(message string) bool {
+	msg := strings.ToLower(message)
+	return strings.Contains(msg, "script") && (strings.Contains(msg, "available") ||
+		strings.Contains(msg, "list") || strings.Contains(msg, "what") ||
+		strings.Contains(msg, "show") || strings.Contains(msg, "which") ||
+		strings.Contains(msg, "have") || strings.Contains(msg, "can i"))
+}
+
 // needsMachineContext returns true if the message appears to be about infrastructure,
 // machines, services, or anything that would benefit from live SSH context.
 // Returns false for general knowledge questions, greetings, etc.
@@ -785,8 +795,8 @@ The system resolves display names automatically. For systemd services, use the e
 		sb.WriteString("\n")
 	}
 
-	// Add ALL machines with compact but complete context
-	if len(machines) > 0 {
+	// Add machines with compact context (only when liveContext is provided)
+	if len(machines) > 0 && liveContext != nil {
 		sb.WriteString(fmt.Sprintf("\n--- INFRASTRUCTURE (%d machines) ---\n", len(machines)))
 		for _, m := range machines {
 			status := m.Status
@@ -1437,6 +1447,37 @@ func AIAgentRoutes(r *mux.Router) {
 			}
 		}
 
+		// Fast path: scripts query - instant, no LLM needed
+		if isScriptsQuery(chatReq.Message) {
+			var sb strings.Builder
+			sb.WriteString("Here are the available scripts:\n\n")
+			if len(config.ScriptDescriptions) > 0 {
+				for name, desc := range config.ScriptDescriptions {
+					sb.WriteString(fmt.Sprintf("- **%s** — %s", name, desc.Description))
+					if desc.Category != "" {
+						sb.WriteString(fmt.Sprintf(" (%s)", desc.Category))
+					}
+					sb.WriteString("\n")
+				}
+			} else {
+				scripts, _ := discoverScripts()
+				if len(scripts) > 0 {
+					for _, s := range scripts {
+						sb.WriteString(fmt.Sprintf("- **%s** — %s\n", s.Name, s.Description))
+					}
+				} else {
+					sb.WriteString("No scripts are currently configured.\n")
+				}
+			}
+			sb.WriteString("\nWould you like to run any of these?")
+			json.NewEncoder(w).Encode(ChatResponse{
+				Message:   sb.String(),
+				SessionID: sessionID,
+				Timestamp: time.Now(),
+			})
+			return
+		}
+
 		// Fast path: service management (restart/stop/start)
 		if action, svcName := parseServiceAction(chatReq.Message); action != "" && svcName != "" {
 			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
@@ -1536,8 +1577,11 @@ func AIAgentRoutes(r *mux.Router) {
 			}
 		}
 
-		// Use pre-warmed context cache (background goroutine keeps it fresh)
-		liveContext := getCachedContext()
+		// Only include machine context when the query needs it
+		var liveContext map[string]string
+		if needsMachineContext(chatReq.Message) || len(chatReq.MachineIDs) > 0 {
+			liveContext = getCachedContext()
+		}
 
 		var messages []ChatMessage
 		systemPrompt := buildSystemPrompt(config, machines, liveContext)
@@ -1580,8 +1624,11 @@ func AIAgentRoutes(r *mux.Router) {
 		messages = append(messages, userMessage)
 
 		// Call LLM
+		log.Printf("AI chat: sending to LLM, prompt_len=%d, history=%d, needs_context=%v",
+			len(systemPrompt), len(messages)-2, liveContext != nil)
 		response, tokens, err := callLLM(req.Context(), config, messages)
 		if err != nil {
+			log.Printf("AI chat error: %v", err)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":      err.Error(),
 				"session_id": sessionID,
