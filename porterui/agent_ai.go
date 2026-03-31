@@ -737,13 +737,14 @@ CRITICAL RULES:
 
 WHEN TO SUGGEST COMMANDS:
 - ONLY when the user explicitly asks to run something, check logs, restart a service, or perform an action.
-- Format commands as a JSON block with the machine's ID (NOT shown to user, use it only in the JSON).
+- Format commands as a JSON block using the machine's display name in the machine_ids field.
 - For systemd services: copy the EXACT log command shown in SERVICES below.
 
 COMMAND FORMAT (only when user requests an action):
 `+"```"+`json
-{"type":"run_command","command":"the actual command","machine_ids":["the-machine-id"]}
+{"type":"run_command","command":"the actual command","machine_ids":["Machine Display Name"]}
 `+"```"+`
+Use the machine's display name (shown in square brackets) in the machine_ids field. The system will resolve it automatically.
 
 IMPORTANT: If you don't have enough information to answer, say so honestly. Don't make things up.
 `, time.Now().Format("Mon Jan 2 15:04:05 MST 2006")) + `
@@ -774,7 +775,7 @@ IMPORTANT: If you don't have enough information to answer, say so honestly. Don'
 
 			if isFocused && hasCtx {
 				// Full context for specifically mentioned machines
-				sb.WriteString(fmt.Sprintf("\n[%s] ID:%s Status:%s\n", m.Name, m.ID, status))
+				sb.WriteString(fmt.Sprintf("\n[%s] Status:%s\n", m.Name, status))
 				if len(m.Tags) > 0 {
 					sb.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(m.Tags, ", ")))
 				}
@@ -783,7 +784,7 @@ IMPORTANT: If you don't have enough information to answer, say so honestly. Don'
 			} else if hasCtx {
 				// Compact one-line summary for other machines
 				h := parseHealthFromContext(ctx)
-				sb.WriteString(fmt.Sprintf("[%s] ID:%s Status:%s", m.Name, m.ID, status))
+				sb.WriteString(fmt.Sprintf("[%s] Status:%s", m.Name, status))
 				if h.Uptime != "" {
 					sb.WriteString(" | " + h.Uptime)
 				}
@@ -799,7 +800,7 @@ IMPORTANT: If you don't have enough information to answer, say so honestly. Don'
 				sb.WriteString("\n")
 			} else {
 				// No context (offline/unreachable)
-				sb.WriteString(fmt.Sprintf("[%s] ID:%s Status:%s\n", m.Name, m.ID, status))
+				sb.WriteString(fmt.Sprintf("[%s] Status:%s\n", m.Name, status))
 			}
 		}
 	}
@@ -812,6 +813,35 @@ IMPORTANT: If you don't have enough information to answer, say so honestly. Don'
 	}
 
 	return sb.String()
+}
+
+// sanitizeLLMResponse replaces any machine IDs and IPs that leaked into the LLM response with display names
+func sanitizeLLMResponse(response string, machines []*Machine) string {
+	for _, m := range machines {
+		// Replace machine IDs with display names (but NOT inside JSON blocks — those need IDs for execution)
+		if m.ID != "" && strings.Contains(response, m.ID) {
+			// Only replace IDs that appear outside of JSON code blocks
+			// Split by code blocks, sanitize non-code parts, rejoin
+			parts := strings.Split(response, "```")
+			for i := range parts {
+				if i%2 == 0 { // Even indices are outside code blocks
+					parts[i] = strings.ReplaceAll(parts[i], m.ID, m.Name)
+				}
+			}
+			response = strings.Join(parts, "```")
+		}
+		// Replace IPs with display names (outside code blocks)
+		if m.IP != "" && strings.Contains(response, m.IP) {
+			parts := strings.Split(response, "```")
+			for i := range parts {
+				if i%2 == 0 {
+					parts[i] = strings.ReplaceAll(parts[i], m.IP, m.Name)
+				}
+			}
+			response = strings.Join(parts, "```")
+		}
+	}
+	return response
 }
 
 // allowedLocalHosts defines hostnames/IPs considered local for LLM connections
@@ -1100,11 +1130,23 @@ func callOllama(ctx context.Context, config *AIAgentConfig, messages []ChatMessa
 func fixMachineIDs(ids []string, allMachines []*Machine) []string {
 	var fixed []string
 	for _, id := range ids {
-		// Already valid
+		// Already valid machine ID
 		found := false
 		for _, m := range allMachines {
 			if m.ID == id {
 				fixed = append(fixed, id)
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		// Try matching by display name (case-insensitive)
+		idLower := strings.ToLower(strings.TrimSpace(id))
+		for _, m := range allMachines {
+			if strings.ToLower(m.Name) == idLower {
+				fixed = append(fixed, m.ID)
 				found = true
 				break
 			}
@@ -1127,6 +1169,17 @@ func fixMachineIDs(ids []string, allMachines []*Machine) []string {
 		// Try matching by IP
 		for _, m := range allMachines {
 			if m.IP == id {
+				fixed = append(fixed, m.ID)
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		// Try partial name match (contains)
+		for _, m := range allMachines {
+			if strings.Contains(strings.ToLower(m.Name), idLower) {
 				fixed = append(fixed, m.ID)
 				found = true
 				break
@@ -1515,13 +1568,13 @@ func AIAgentRoutes(r *mux.Router) {
 			messages = append(messages, msg)
 		}
 
-		// Enrich user message: replace IPs with machine name+ID hints so the LLM can connect them
+		// Enrich user message: replace IPs with machine display names
 		enrichedMessage := chatReq.Message
 		if ips := ipRegex.FindAllString(chatReq.Message, -1); len(ips) > 0 {
 			for _, ip := range ips {
 				for _, m := range machines {
 					if m.IP == ip {
-						enrichedMessage = strings.ReplaceAll(enrichedMessage, ip, fmt.Sprintf("%s (ID: %s)", m.Name, m.ID))
+						enrichedMessage = strings.ReplaceAll(enrichedMessage, ip, m.Name)
 						break
 					}
 				}
@@ -1545,6 +1598,9 @@ func AIAgentRoutes(r *mux.Router) {
 			})
 			return
 		}
+
+		// Sanitize: replace any leaked machine IDs with display names
+		response = sanitizeLLMResponse(response, machines)
 
 		// Parse actions from response
 		actions := parseActions(response, machines)
