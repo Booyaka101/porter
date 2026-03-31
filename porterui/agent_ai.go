@@ -99,16 +99,15 @@ var (
 	chatSessionsAccess = make(map[string]time.Time) // last access time per session
 )
 
-// startSessionCleanup runs a background goroutine that evicts stale sessions and cache entries.
-func startSessionCleanup() {
+// startBackgroundTasks runs background goroutines for cache warming and session cleanup.
+func startBackgroundTasks() {
 	cleanupOnce.Do(func() {
+		// Session cleanup every 5 minutes
 		go func() {
 			ticker := time.NewTicker(5 * time.Minute)
 			defer ticker.Stop()
 			for range ticker.C {
 				now := time.Now()
-
-				// Evict chat sessions idle for > 30 minutes
 				chatSessionsLock.Lock()
 				for id, lastAccess := range chatSessionsAccess {
 					if now.Sub(lastAccess) > 30*time.Minute {
@@ -117,19 +116,34 @@ func startSessionCleanup() {
 					}
 				}
 				chatSessionsLock.Unlock()
+			}
+		}()
 
-				// Evict stale context cache entries (> 5 minutes old)
-				liveContextCacheLock.Lock()
-				for id, ts := range liveContextCacheTTL {
-					if now.Sub(ts) > 5*time.Minute {
-						delete(liveContextCache, id)
-						delete(liveContextCacheTTL, id)
-					}
-				}
-				liveContextCacheLock.Unlock()
+		// Context pre-warmer: refresh all online machines every 45 seconds
+		go func() {
+			// Initial warm-up after a short delay (let machines register)
+			time.Sleep(10 * time.Second)
+			warmContextCache()
+
+			ticker := time.NewTicker(45 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				warmContextCache()
 			}
 		}()
 	})
+}
+
+// warmContextCache gathers context for all online machines in the background
+func warmContextCache() {
+	if machineRepo == nil {
+		return
+	}
+	machines := machineRepo.List()
+	if len(machines) == 0 {
+		return
+	}
+	gatherContextForMachines(machines)
 }
 
 // SetAIAgentConfig sets the AI agent configuration (called by wrappers)
@@ -719,88 +733,75 @@ func buildMachineDetail(m *Machine, ctx string) string {
 	return sb.String()
 }
 
-// buildSystemPrompt creates a context-aware system prompt with live machine data
-// focusedMachineIDs: machines the user specifically asked about (get full context)
-// If empty, all machines get compact summary only
-func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string, focusedMachineIDs map[string]bool) string {
+// getCachedContext returns all cached machine context (populated by background warmer)
+func getCachedContext() map[string]string {
+	liveContextCacheLock.RLock()
+	defer liveContextCacheLock.RUnlock()
+	result := make(map[string]string, len(liveContextCache))
+	for k, v := range liveContextCache {
+		result[k] = v
+	}
+	return result
+}
+
+// buildSystemPrompt creates a context-aware system prompt with full live machine data
+func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf(`You are Porter AI, a friendly and knowledgeable infrastructure assistant. You help manage servers and answer questions in a clear, human-like way. The users may not be technical — always explain things simply and helpfully.
+	sb.WriteString(fmt.Sprintf(`You are Porter AI, a friendly and expert infrastructure assistant. You manage a fleet of servers and help users understand and control them. Users may not be technical — explain things clearly and naturally, like a helpful colleague.
 
-CRITICAL RULES:
-1. NEVER show machine IDs (like "machine-1769...") to the user. ALWAYS use the machine's display name (shown in square brackets below).
-2. NEVER show IP addresses in your responses.
-3. Answer questions naturally and conversationally. Be helpful, warm, and clear.
-4. When asked about a machine, describe its status using the data below — uptime, memory, disk, docker containers, services.
-5. For general questions (time, greetings, advice, explanations): just answer normally, like a helpful assistant.
-6. Current server time: %s
+Current time: %s
+
+YOUR PERSONALITY:
+- Be warm, helpful, and conversational
+- Give direct, useful answers — not vague suggestions
+- When you have data about a machine, USE IT to answer. Don't say "I don't have info" when it's right in front of you
+- For non-infrastructure questions (greetings, time, general knowledge): answer naturally
+- If you truly don't know something, say so honestly
+
+ABSOLUTE RULES:
+- NEVER show internal machine IDs (they look like "machine-1769...")
+- NEVER show IP addresses
+- ALWAYS refer to machines by their display name (in square brackets below)
+- When describing machine health, use the actual data provided — memory, disk, uptime, docker status, services
 
 WHEN TO SUGGEST COMMANDS:
-- ONLY when the user explicitly asks to run something, check logs, restart a service, or perform an action.
-- Format commands as a JSON block using the machine's display name in the machine_ids field.
-- For systemd services: copy the EXACT log command shown in SERVICES below.
-
-COMMAND FORMAT (only when user requests an action):
+Only when the user explicitly asks to DO something (run, restart, check logs, execute).
+Use this exact JSON format inside a code block:
 `+"```"+`json
-{"type":"run_command","command":"the actual command","machine_ids":["Machine Display Name"]}
+{"type":"run_command","command":"actual_command_here","machine_ids":["Machine Display Name"]}
 `+"```"+`
-Use the machine's display name (shown in square brackets) in the machine_ids field. The system will resolve it automatically.
-
-IMPORTANT: If you don't have enough information to answer, say so honestly. Don't make things up.
-`, time.Now().Format("Mon Jan 2 15:04:05 MST 2006")) + `
-`)
+The system resolves display names automatically. For systemd services, use the exact command from the SERVICES section.
+`, time.Now().Format("Mon Jan 2 15:04:05 MST 2006")))
 
 	// Add scripts
 	if len(config.ScriptDescriptions) > 0 {
-		sb.WriteString("SCRIPTS: ")
+		sb.WriteString("\nAVAILABLE SCRIPTS: ")
 		names := make([]string, 0, len(config.ScriptDescriptions))
-		for name := range config.ScriptDescriptions {
-			names = append(names, name)
+		for name, desc := range config.ScriptDescriptions {
+			names = append(names, fmt.Sprintf("%s (%s)", name, desc.Description))
 		}
 		sb.WriteString(strings.Join(names, ", "))
-		sb.WriteString("\n\n")
+		sb.WriteString("\n")
 	}
 
-	// Add machines
+	// Add ALL machines with full context
 	if len(machines) > 0 {
-		sb.WriteString("MACHINES:\n")
+		sb.WriteString(fmt.Sprintf("\n--- INFRASTRUCTURE (%d machines) ---\n", len(machines)))
 		for _, m := range machines {
 			status := m.Status
 			if status == "" {
 				status = "unknown"
 			}
 
-			ctx, hasCtx := liveContext[m.ID]
-			isFocused := focusedMachineIDs[m.ID]
+			sb.WriteString(fmt.Sprintf("\n## %s [%s]\n", m.Name, status))
+			if len(m.Tags) > 0 {
+				sb.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(m.Tags, ", ")))
+			}
 
-			if isFocused && hasCtx {
-				// Full context for specifically mentioned machines
-				sb.WriteString(fmt.Sprintf("\n[%s] Status:%s\n", m.Name, status))
-				if len(m.Tags) > 0 {
-					sb.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(m.Tags, ", ")))
-				}
+			if ctx, ok := liveContext[m.ID]; ok && ctx != "" {
 				sb.WriteString(ctx)
 				sb.WriteString("\n")
-			} else if hasCtx {
-				// Compact one-line summary for other machines
-				h := parseHealthFromContext(ctx)
-				sb.WriteString(fmt.Sprintf("[%s] Status:%s", m.Name, status))
-				if h.Uptime != "" {
-					sb.WriteString(" | " + h.Uptime)
-				}
-				if h.Memory != "" {
-					sb.WriteString(" | " + h.Memory)
-				}
-				if h.Disk != "" {
-					sb.WriteString(" | " + h.Disk)
-				}
-				if h.Docker != "" {
-					sb.WriteString(" | Docker: " + h.Docker)
-				}
-				sb.WriteString("\n")
-			} else {
-				// No context (offline/unreachable)
-				sb.WriteString(fmt.Sprintf("[%s] Status:%s\n", m.Name, status))
 			}
 		}
 	}
@@ -1086,7 +1087,7 @@ func callOllama(ctx context.Context, config *AIAgentConfig, messages []ChatMessa
 		"stream":   false,
 		"options": map[string]interface{}{
 			"num_predict": maxTokens,
-			"num_ctx":     4096,
+			"num_ctx":     16384,
 		},
 	}
 
@@ -1297,7 +1298,7 @@ func parseActions(response string, allMachines []*Machine) []AgentAction {
 
 // AIAgentRoutes sets up the AI agent API routes
 func AIAgentRoutes(r *mux.Router) {
-	startSessionCleanup()
+	startBackgroundTasks()
 
 	// GET /api/ai-agent/config - Get AI agent configuration status
 	r.HandleFunc("/api/ai-agent/config", func(w http.ResponseWriter, req *http.Request) {
@@ -1506,51 +1507,11 @@ func AIAgentRoutes(r *mux.Router) {
 			}
 		}
 
-		// Determine which machines to gather context for
-		var contextMachines []*Machine
-		focusedIDs := make(map[string]bool)
-
-		if len(chatReq.MachineIDs) > 0 {
-			seen := make(map[string]bool)
-			for _, id := range chatReq.MachineIDs {
-				if m, ok := machineRepo.Get(id); ok && !seen[m.ID] {
-					contextMachines = append(contextMachines, m)
-					seen[m.ID] = true
-					focusedIDs[m.ID] = true
-				}
-			}
-			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
-			for _, m := range mentioned {
-				if !seen[m.ID] {
-					contextMachines = append(contextMachines, m)
-					seen[m.ID] = true
-				}
-				focusedIDs[m.ID] = true
-			}
-		} else {
-			mentioned := resolveMachinesFromMessage(chatReq.Message, machines)
-			if len(mentioned) > 0 {
-				seen := make(map[string]bool)
-				for _, m := range mentioned {
-					if !seen[m.ID] {
-						contextMachines = append(contextMachines, m)
-						seen[m.ID] = true
-						focusedIDs[m.ID] = true
-					}
-				}
-			} else if needsMachineContext(chatReq.Message) {
-				contextMachines = machines
-			}
-		}
-
-		// Gather live context only if we have machines to query
-		liveContext := make(map[string]string)
-		if len(contextMachines) > 0 {
-			liveContext = gatherContextForMachines(contextMachines)
-		}
+		// Use pre-warmed context cache (background goroutine keeps it fresh)
+		liveContext := getCachedContext()
 
 		var messages []ChatMessage
-		systemPrompt := buildSystemPrompt(config, machines, liveContext, focusedIDs)
+		systemPrompt := buildSystemPrompt(config, machines, liveContext)
 		messages = append(messages, ChatMessage{
 			Role:    "system",
 			Content: systemPrompt,
