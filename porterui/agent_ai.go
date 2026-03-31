@@ -503,18 +503,25 @@ func isScriptsQuery(message string) bool {
 // Returns false for general knowledge questions, greetings, etc.
 func needsMachineContext(message string) bool {
 	msg := strings.ToLower(message)
-	infraWords := []string{
-		"machine", "server", "docker", "container", "service", "systemd", "systemctl",
-		"memory", "disk", "cpu", "load", "uptime", "restart", "deploy", "log", "logs",
-		"health", "status", "running", "stopped", "failed", "error", "crash",
-		"network", "port", "ssh", "process", "kill", "install", "update", "upgrade",
+	// Phrases that strongly indicate infrastructure queries
+	infraPhrases := []string{
+		"how is", "how are", "check on", "what's running",
+		"machine health", "machine status", "server health", "server status",
+		"all machines", "all servers", "every machine", "every server",
+		"docker", "container", "systemd", "systemctl",
+		"memory usage", "disk usage", "disk space", "cpu usage", "cpu load",
+		"uptime", "restart service", "restart container",
+		"which machine", "which server", "on the server", "on the machine",
+		"is it running", "is it down", "is it up", "is it online",
+		"show me the logs", "check logs", "view logs",
 		"nginx", "apache", "postgres", "mysql", "redis", "mongo",
 	}
-	for _, w := range infraWords {
-		if strings.Contains(msg, w) {
+	for _, p := range infraPhrases {
+		if strings.Contains(msg, p) {
 			return true
 		}
 	}
+	// Check if user references a specific machine by name
 	if ipRegex.MatchString(msg) {
 		return true
 	}
@@ -1590,15 +1597,23 @@ func AIAgentRoutes(r *mux.Router) {
 			Content: systemPrompt,
 		})
 
-		// Add history from session
+		// Add history from session (limit to last 6 to keep prompt small)
 		chatSessionsLock.RLock()
 		if history, ok := chatSessions[sessionID]; ok {
-			messages = append(messages, history...)
+			if len(history) > 6 {
+				messages = append(messages, history[len(history)-6:]...)
+			} else {
+				messages = append(messages, history...)
+			}
 		}
 		chatSessionsLock.RUnlock()
 
-		// Add provided history (for context continuity)
-		for _, msg := range chatReq.History {
+		// Add provided history (limit to last 6)
+		historyToAdd := chatReq.History
+		if len(historyToAdd) > 6 {
+			historyToAdd = historyToAdd[len(historyToAdd)-6:]
+		}
+		for _, msg := range historyToAdd {
 			messages = append(messages, msg)
 		}
 
