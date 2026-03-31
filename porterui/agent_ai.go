@@ -580,14 +580,31 @@ func buildHealthOverview(machines []*Machine, liveContext map[string]string) str
 func isMachineInfoQuery(message string) bool {
 	msg := strings.ToLower(message)
 	infoPatterns := []string{
-		"tell me about", "tell me more about", "info on", "info about",
-		"information on", "information about", "details on", "details about",
+		"tell me about", "tell me more about",
+		"info on", "info about", "info of", "info for",
+		"give me info", "give info", "get info",
+		"information on", "information about", "information of", "information for",
+		"details on", "details about", "details of", "details for",
 		"what is running on", "what's running on", "whats running on",
+		"what is on", "what's on",
 		"show me", "describe", "more about", "full info",
+		"check on", "check the", "look at",
+		"status of", "health of",
+		"how is the", "how's the",
 	}
 	for _, p := range infoPatterns {
 		if strings.Contains(msg, p) {
 			return true
+		}
+	}
+	// Also match "<machine ref> + info word" patterns
+	hasRef := ipRegex.MatchString(msg) || strings.Contains(msg, "machine")
+	infoWords := []string{"info", "detail", "status", "health", "about", "running", "check"}
+	if hasRef {
+		for _, w := range infoWords {
+			if strings.Contains(msg, w) {
+				return true
+			}
 		}
 	}
 	return false
@@ -708,31 +725,28 @@ func buildMachineDetail(m *Machine, ctx string) string {
 func buildSystemPrompt(config *AIAgentConfig, machines []*Machine, liveContext map[string]string, focusedMachineIDs map[string]bool) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf(`You are Porter AI, an infrastructure assistant. Be concise and direct.
-Do NOT include IP addresses in your responses. Use machine display names only.
-Current server time: %s
+	sb.WriteString(fmt.Sprintf(`You are Porter AI, a friendly and knowledgeable infrastructure assistant. You help manage servers and answer questions in a clear, human-like way. The users may not be technical — always explain things simply and helpfully.
 
-WHEN TO USE JSON ACTION BLOCKS:
-- ONLY when the user explicitly asks to run a command, check logs, restart something, or execute an action on a specific machine.
-- NEVER for questions, explanations, time, health status, or general chat.
+CRITICAL RULES:
+1. NEVER show machine IDs (like "machine-1769...") to the user. ALWAYS use the machine's display name (shown in square brackets below).
+2. NEVER show IP addresses in your responses.
+3. Answer questions naturally and conversationally. Be helpful, warm, and clear.
+4. When asked about a machine, describe its status using the data below — uptime, memory, disk, docker containers, services.
+5. For general questions (time, greetings, advice, explanations): just answer normally, like a helpful assistant.
+6. Current server time: %s
 
-WHEN NOT TO USE JSON:
-- "what time is it" -> answer with the server time shown above
-- "what is running on X" -> describe what you see in the machine data
-- "how much disk space" -> answer from the machine data
-- Any general question -> answer directly in plain text
+WHEN TO SUGGEST COMMANDS:
+- ONLY when the user explicitly asks to run something, check logs, restart a service, or perform an action.
+- Format commands as a JSON block with the machine's ID (NOT shown to user, use it only in the JSON).
+- For systemd services: copy the EXACT log command shown in SERVICES below.
 
-SYSTEMD SERVICES:
-- The SERVICES section below shows exact log commands. User-level services use "journalctl --user -u", system services use "journalctl -u". Copy the exact command shown.
-
-EXAMPLE - user says "show me logs for myapp on ServerA" (ServerA has ID abc123):
+COMMAND FORMAT (only when user requests an action):
 `+"```"+`json
-{"type":"run_command","command":"docker logs myapp --tail 100","machine_ids":["abc123"]}
+{"type":"run_command","command":"the actual command","machine_ids":["the-machine-id"]}
 `+"```"+`
 
-EXAMPLE - user says "what time is it":
-The current server time is %s
-`, time.Now().Format("Mon Jan 2 15:04:05 MST 2006"), time.Now().Format("Mon Jan 2 15:04:05 MST 2006")) + `
+IMPORTANT: If you don't have enough information to answer, say so honestly. Don't make things up.
+`, time.Now().Format("Mon Jan 2 15:04:05 MST 2006")) + `
 `)
 
 	// Add scripts
