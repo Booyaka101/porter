@@ -2,6 +2,7 @@ package porterui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -91,11 +92,45 @@ type ActionConfirmRequest struct {
 
 // Global AI agent configuration
 var (
-	aiAgentConfig     *AIAgentConfig
-	aiAgentConfigLock sync.RWMutex
-	chatSessions      = make(map[string][]ChatMessage)
-	chatSessionsLock  sync.RWMutex
+	aiAgentConfig      *AIAgentConfig
+	aiAgentConfigLock  sync.RWMutex
+	chatSessions       = make(map[string][]ChatMessage)
+	chatSessionsLock   sync.RWMutex
+	chatSessionsAccess = make(map[string]time.Time) // last access time per session
 )
+
+// startSessionCleanup runs a background goroutine that evicts stale sessions and cache entries.
+func startSessionCleanup() {
+	cleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				now := time.Now()
+
+				// Evict chat sessions idle for > 30 minutes
+				chatSessionsLock.Lock()
+				for id, lastAccess := range chatSessionsAccess {
+					if now.Sub(lastAccess) > 30*time.Minute {
+						delete(chatSessions, id)
+						delete(chatSessionsAccess, id)
+					}
+				}
+				chatSessionsLock.Unlock()
+
+				// Evict stale context cache entries (> 5 minutes old)
+				liveContextCacheLock.Lock()
+				for id, ts := range liveContextCacheTTL {
+					if now.Sub(ts) > 5*time.Minute {
+						delete(liveContextCache, id)
+						delete(liveContextCacheTTL, id)
+					}
+				}
+				liveContextCacheLock.Unlock()
+			}
+		}()
+	})
+}
 
 // SetAIAgentConfig sets the AI agent configuration (called by wrappers)
 func SetAIAgentConfig(config *AIAgentConfig) {
@@ -117,6 +152,8 @@ var (
 	liveContextCacheLock sync.RWMutex
 	liveContextCacheTTL  = make(map[string]time.Time)
 	ipRegex              = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
+	sshSemaphore         = make(chan struct{}, 10) // limit concurrent SSH connections
+	cleanupOnce          sync.Once
 )
 
 // resolveMachinesFromMessage parses user message for IPs or machine names
@@ -187,11 +224,15 @@ func gatherMachineContext(m *Machine) string {
 	return output
 }
 
-// gatherContextForMachines gathers context for multiple machines concurrently
+// gatherContextForMachines gathers context for multiple machines concurrently.
+// Uses a semaphore to limit concurrent SSH connections and respects timeouts.
 func gatherContextForMachines(machines []*Machine) map[string]string {
 	results := make(map[string]string)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	for _, m := range machines {
 		if m.Status != "online" && m.Status != "" {
@@ -200,16 +241,30 @@ func gatherContextForMachines(machines []*Machine) map[string]string {
 		wg.Add(1)
 		go func(machine *Machine) {
 			defer wg.Done()
-			ctx := gatherMachineContext(machine)
-			if ctx != "" {
+
+			// Acquire semaphore (or bail if timeout)
+			select {
+			case sshSemaphore <- struct{}{}:
+				defer func() { <-sshSemaphore }()
+			case <-ctx.Done():
+				return
+			}
+
+			// Check if we've already timed out before starting SSH
+			if ctx.Err() != nil {
+				return
+			}
+
+			machineCtx := gatherMachineContext(machine)
+			if machineCtx != "" {
 				mu.Lock()
-				results[machine.ID] = ctx
+				results[machine.ID] = machineCtx
 				mu.Unlock()
 			}
 		}(m)
 	}
 
-	// Wait with timeout
+	// Wait for all goroutines to finish (they will either complete or bail on ctx.Done)
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -217,7 +272,11 @@ func gatherContextForMachines(machines []*Machine) map[string]string {
 	}()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
+		// Timeout: goroutines that already acquired the semaphore will finish
+		// naturally (SSH has its own 20s connect timeout). Goroutines waiting
+		// on the semaphore will bail via ctx.Done. We don't abandon goroutines —
+		// the wg.Wait goroutine will clean up when they finish.
 	}
 
 	return results
@@ -616,7 +675,7 @@ The current server time is %s
 }
 
 // callLLM sends a request to the configured LLM provider
-func callLLM(config *AIAgentConfig, messages []ChatMessage) (string, int, error) {
+func callLLM(ctx context.Context, config *AIAgentConfig, messages []ChatMessage) (string, int, error) {
 	apiKey := config.APIKey
 	if apiKey == "" {
 		apiKey = os.Getenv("PORTER_AI_API_KEY")
@@ -627,21 +686,21 @@ func callLLM(config *AIAgentConfig, messages []ChatMessage) (string, int, error)
 		if apiKey == "" {
 			return "", 0, fmt.Errorf("AI API key not configured. Set PORTER_AI_API_KEY environment variable or configure in wrapper")
 		}
-		return callOpenAI(config, messages, apiKey)
+		return callOpenAI(ctx, config, messages, apiKey)
 	case "anthropic":
 		if apiKey == "" {
 			return "", 0, fmt.Errorf("AI API key not configured. Set PORTER_AI_API_KEY environment variable or configure in wrapper")
 		}
-		return callAnthropic(config, messages, apiKey)
+		return callAnthropic(ctx, config, messages, apiKey)
 	case "ollama":
-		return callOllama(config, messages)
+		return callOllama(ctx, config, messages)
 	default:
 		return "", 0, fmt.Errorf("unsupported AI provider: %s", config.Provider)
 	}
 }
 
 // callOpenAI calls the OpenAI API
-func callOpenAI(config *AIAgentConfig, messages []ChatMessage, apiKey string) (string, int, error) {
+func callOpenAI(ctx context.Context, config *AIAgentConfig, messages []ChatMessage, apiKey string) (string, int, error) {
 	model := config.Model
 	if model == "" {
 		model = "gpt-4"
@@ -675,7 +734,7 @@ func callOpenAI(config *AIAgentConfig, messages []ChatMessage, apiKey string) (s
 
 	jsonBody, _ := json.Marshal(reqBody)
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", 0, err
 	}
@@ -719,7 +778,7 @@ func callOpenAI(config *AIAgentConfig, messages []ChatMessage, apiKey string) (s
 }
 
 // callAnthropic calls the Anthropic API
-func callAnthropic(config *AIAgentConfig, messages []ChatMessage, apiKey string) (string, int, error) {
+func callAnthropic(ctx context.Context, config *AIAgentConfig, messages []ChatMessage, apiKey string) (string, int, error) {
 	model := config.Model
 	if model == "" {
 		model = "claude-3-sonnet-20240229"
@@ -756,7 +815,7 @@ func callAnthropic(config *AIAgentConfig, messages []ChatMessage, apiKey string)
 
 	jsonBody, _ := json.Marshal(reqBody)
 
-	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", 0, err
 	}
@@ -800,7 +859,7 @@ func callAnthropic(config *AIAgentConfig, messages []ChatMessage, apiKey string)
 }
 
 // callOllama calls a local Ollama instance
-func callOllama(config *AIAgentConfig, messages []ChatMessage) (string, int, error) {
+func callOllama(ctx context.Context, config *AIAgentConfig, messages []ChatMessage) (string, int, error) {
 	baseURL := config.BaseURL
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
@@ -837,7 +896,7 @@ func callOllama(config *AIAgentConfig, messages []ChatMessage) (string, int, err
 
 	jsonBody, _ := json.Marshal(reqBody)
 
-	req, err := http.NewRequest("POST", baseURL+"/api/chat", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/chat", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", 0, err
 	}
@@ -1019,6 +1078,8 @@ func parseActions(response string, allMachines []*Machine) []AgentAction {
 
 // AIAgentRoutes sets up the AI agent API routes
 func AIAgentRoutes(r *mux.Router) {
+	startSessionCleanup()
+
 	// GET /api/ai-agent/config - Get AI agent configuration status
 	r.HandleFunc("/api/ai-agent/config", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1272,7 +1333,7 @@ func AIAgentRoutes(r *mux.Router) {
 		messages = append(messages, userMessage)
 
 		// Call LLM
-		response, tokens, err := callLLM(config, messages)
+		response, tokens, err := callLLM(req.Context(), config, messages)
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":      err.Error(),
@@ -1297,6 +1358,7 @@ func AIAgentRoutes(r *mux.Router) {
 		if len(chatSessions[sessionID]) > 20 {
 			chatSessions[sessionID] = chatSessions[sessionID][len(chatSessions[sessionID])-20:]
 		}
+		chatSessionsAccess[sessionID] = time.Now()
 		chatSessionsLock.Unlock()
 
 		json.NewEncoder(w).Encode(ChatResponse{

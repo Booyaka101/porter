@@ -514,7 +514,7 @@ func AIAgentDebugRoutes(r *mux.Router) {
 			{Role: "user", Content: investigationLog.String()},
 		}
 
-		summary, _, err := callLLM(config, analysisMessages)
+		summary, _, err := callLLM(req.Context(), config, analysisMessages)
 		if err != nil {
 			summary = "Analysis failed: " + err.Error()
 		}
