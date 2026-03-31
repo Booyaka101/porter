@@ -785,7 +785,7 @@ The system resolves display names automatically. For systemd services, use the e
 		sb.WriteString("\n")
 	}
 
-	// Add ALL machines with full context
+	// Add ALL machines with compact but complete context
 	if len(machines) > 0 {
 		sb.WriteString(fmt.Sprintf("\n--- INFRASTRUCTURE (%d machines) ---\n", len(machines)))
 		for _, m := range machines {
@@ -794,14 +794,43 @@ The system resolves display names automatically. For systemd services, use the e
 				status = "unknown"
 			}
 
-			sb.WriteString(fmt.Sprintf("\n## %s [%s]\n", m.Name, status))
-			if len(m.Tags) > 0 {
-				sb.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(m.Tags, ", ")))
-			}
-
-			if ctx, ok := liveContext[m.ID]; ok && ctx != "" {
-				sb.WriteString(ctx)
+			ctx, hasCtx := liveContext[m.ID]
+			if hasCtx && ctx != "" {
+				h := parseHealthFromContext(ctx)
+				sb.WriteString(fmt.Sprintf("\n## %s [%s]", m.Name, status))
+				if h.Uptime != "" {
+					sb.WriteString(" | " + h.Uptime)
+				}
+				if h.Memory != "" {
+					sb.WriteString(" | " + h.Memory)
+				}
+				if h.Disk != "" {
+					sb.WriteString(" | " + h.Disk)
+				}
 				sb.WriteString("\n")
+
+				// Include docker containers
+				if h.Docker != "" {
+					sb.WriteString("Docker: " + h.Docker + "\n")
+				}
+
+				// Include services (compact)
+				inServices := false
+				for _, line := range strings.Split(ctx, "\n") {
+					trimmed := strings.TrimSpace(line)
+					if trimmed == "SERVICES:" {
+						inServices = true
+						continue
+					}
+					if inServices && trimmed != "" {
+						sb.WriteString("  " + trimmed + "\n")
+					}
+				}
+			} else {
+				sb.WriteString(fmt.Sprintf("\n## %s [%s]\n", m.Name, status))
+			}
+			if len(m.Tags) > 0 {
+				sb.WriteString("Tags: " + strings.Join(m.Tags, ", ") + "\n")
 			}
 		}
 	}
@@ -1087,7 +1116,7 @@ func callOllama(ctx context.Context, config *AIAgentConfig, messages []ChatMessa
 		"stream":   false,
 		"options": map[string]interface{}{
 			"num_predict": maxTokens,
-			"num_ctx":     16384,
+			"num_ctx":     8192,
 		},
 	}
 
