@@ -791,15 +791,24 @@ Use this exact JSON format inside a code block:
 The system resolves display names automatically. For systemd services, use the exact command from the SERVICES section.
 `, time.Now().Format("Mon Jan 2 15:04:05 MST 2006")))
 
-	// Add scripts
+	// Add scripts with full details
 	if len(config.ScriptDescriptions) > 0 {
-		sb.WriteString("\nAVAILABLE SCRIPTS: ")
-		names := make([]string, 0, len(config.ScriptDescriptions))
-		for name, desc := range config.ScriptDescriptions {
-			names = append(names, fmt.Sprintf("%s (%s)", name, desc.Description))
+		sb.WriteString("\n--- AVAILABLE SCRIPTS ---\n")
+		for _, desc := range config.ScriptDescriptions {
+			sb.WriteString(fmt.Sprintf("\n**%s** — %s\n", desc.Name, desc.Description))
+			if len(desc.Flags) > 0 {
+				sb.WriteString("Flags:\n")
+				for _, f := range desc.Flags {
+					sb.WriteString("  " + f + "\n")
+				}
+			}
+			if len(desc.Examples) > 0 {
+				sb.WriteString("Examples:\n")
+				for _, e := range desc.Examples {
+					sb.WriteString("  " + e + "\n")
+				}
+			}
 		}
-		sb.WriteString(strings.Join(names, ", "))
-		sb.WriteString("\n")
 	}
 
 	// Add machines with compact context (only when liveContext is provided)
@@ -1459,10 +1468,20 @@ func AIAgentRoutes(r *mux.Router) {
 			var sb strings.Builder
 			sb.WriteString("Here are the available scripts:\n\n")
 			if len(config.ScriptDescriptions) > 0 {
-				for name, desc := range config.ScriptDescriptions {
-					sb.WriteString(fmt.Sprintf("- **%s** — %s", name, desc.Description))
-					if desc.Category != "" {
-						sb.WriteString(fmt.Sprintf(" (%s)", desc.Category))
+				for _, desc := range config.ScriptDescriptions {
+					sb.WriteString(fmt.Sprintf("### %s\n%s\n", desc.Name, desc.Description))
+					if len(desc.Flags) > 0 {
+						sb.WriteString("\n**Flags:**\n")
+						for _, f := range desc.Flags {
+							sb.WriteString(fmt.Sprintf("- `%s`\n", f))
+						}
+					}
+					if len(desc.Examples) > 0 {
+						sb.WriteString("\n**Examples:**\n```\n")
+						for _, e := range desc.Examples {
+							sb.WriteString(e + "\n")
+						}
+						sb.WriteString("```\n")
 					}
 					sb.WriteString("\n")
 				}
@@ -1476,7 +1495,7 @@ func AIAgentRoutes(r *mux.Router) {
 					sb.WriteString("No scripts are currently configured.\n")
 				}
 			}
-			sb.WriteString("\nWould you like to run any of these?")
+			sb.WriteString("Would you like to know more about any of these, or run one?")
 			json.NewEncoder(w).Encode(ChatResponse{
 				Message:   sb.String(),
 				SessionID: sessionID,
