@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -216,6 +217,81 @@ func (e *Executor) run(cmd string) error {
 	return err
 }
 
+// writeFile writes content to dest. With no sudo, mode, or owner it streams
+// straight to dest via a quoted heredoc (the original behavior). When any of
+// those is set, content is first staged in a private temp file — mktemp
+// creates it 0600, so secrets like private keys never sit world-readable —
+// and then placed into dest with the requested mode/owner before the temp is
+// removed.
+func (e *Executor) writeFile(dest, content string, sudo bool, perm, owner string) error {
+	if !sudo && perm == "" && owner == "" {
+		return e.run("cat > " + dest + " <<'PORTER_EOF'\n" + content + "\nPORTER_EOF")
+	}
+	tmp, err := e.runCapture("mktemp")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = e.run("rm -f " + tmp) }()
+	if err := e.run("cat > " + tmp + " <<'PORTER_EOF'\n" + content + "\nPORTER_EOF"); err != nil {
+		return err
+	}
+
+	place := e.run
+	if sudo {
+		place = e.runSudo
+	}
+
+	// install sets mode (and owner) atomically when a mode is given; without
+	// a mode, copy then chown so we don't force install's default 0755.
+	if perm != "" {
+		cmd := "install -m " + perm
+		if owner != "" {
+			user, group, hasGroup := splitOwner(owner)
+			cmd += " -o " + user
+			if hasGroup {
+				cmd += " -g " + group
+			}
+		}
+		return place(cmd + " " + tmp + " " + dest)
+	}
+	if err := place("cp " + tmp + " " + dest); err != nil {
+		return err
+	}
+	if owner != "" {
+		return place("chown " + owner + " " + dest)
+	}
+	return nil
+}
+
+// trustCA installs the CA certificate at certPath into the OS trust store so
+// the machine trusts HTTPS peers signed by it without warnings. anchor is the
+// filename under /usr/local/share/ca-certificates (defaults to certPath's base
+// name); update-ca-certificates only consumes *.crt, so a .crt suffix is
+// ensured.
+func (e *Executor) trustCA(certPath, anchor string) error {
+	if anchor == "" {
+		anchor = filepath.Base(certPath)
+	}
+	if !strings.HasSuffix(anchor, ".crt") {
+		anchor += ".crt"
+	}
+	target := "/usr/local/share/ca-certificates/" + anchor
+	if err := e.runSudo("cp " + certPath + " " + target); err != nil {
+		return err
+	}
+	return e.runSudo("update-ca-certificates")
+}
+
+// splitOwner splits a "user:group" owner spec. hasGroup is false when only a
+// user is given (no colon, or an empty group).
+func splitOwner(owner string) (user, group string, hasGroup bool) {
+	parts := strings.SplitN(owner, ":", 2)
+	if len(parts) == 2 && parts[1] != "" {
+		return parts[0], parts[1], true
+	}
+	return parts[0], "", false
+}
+
 func (e *Executor) runSudo(cmd string) error {
 	return e.run(e.sudo(cmd))
 }
@@ -262,6 +338,8 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 	src := vars.Expand(t.Src)
 	dest := vars.Expand(t.Dest)
 	body := vars.Expand(t.Body)
+	perm := vars.Expand(t.Perm)
+	own := vars.Expand(t.Own)
 
 	switch t.Action {
 	// File operations
@@ -284,9 +362,9 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 	case "sed":
 		return e.runSudo("sed -i '" + body + "' " + dest)
 	case "write":
-		return e.run("cat > " + dest + " <<'EOF'\n" + body + "\nEOF")
+		return e.writeFile(dest, body, t.Sudo, perm, own)
 	case "chown":
-		owner := body
+		owner := own
 		if owner == "" {
 			owner = vars.Get("default_owner")
 		}
@@ -299,11 +377,13 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 		}
 		return e.runSudo("chown " + flag + owner + " " + dest)
 	case "chmod":
-		mode := body
+		mode := perm
 		if mode == "" {
 			mode = "+x"
 		}
 		return e.runSudo("chmod " + mode + " " + dest)
+	case "trust_ca":
+		return e.trustCA(dest, src)
 	case "install":
 		if err := e.runSudo("cp " + src + " " + dest); err != nil {
 			return err

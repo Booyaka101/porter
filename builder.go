@@ -60,11 +60,11 @@ func (b TaskBuilder) Sudo() TaskBuilder { b.t.Sudo = true; return b }
 // Recursive enables recursive operation for file commands.
 func (b TaskBuilder) Recursive() TaskBuilder { b.t.Rec = true; return b }
 
-// Owner sets the owner for file operations (used with Chown).
-func (b TaskBuilder) Owner(o string) TaskBuilder { b.t.Body = o; return b }
+// Owner sets the owner for file operations (used with Chown and Write).
+func (b TaskBuilder) Owner(o string) TaskBuilder { b.t.Own = o; return b }
 
-// Mode sets the file mode/permissions (used with Chmod).
-func (b TaskBuilder) Mode(m string) TaskBuilder { b.t.Body = m; return b }
+// Mode sets the file mode/permissions (used with Chmod and Write).
+func (b TaskBuilder) Mode(m string) TaskBuilder { b.t.Perm = m; return b }
 
 // =============================================================================
 // RETRY AND TIMEOUT
