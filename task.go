@@ -13,6 +13,8 @@ type Task struct {
 	User     bool          // Use user-level systemd
 	Sudo     bool          // Run with sudo
 	Rec      bool          // Recursive flag
+	Perm     string        // File mode (chmod, write) e.g. "0600"
+	Own      string        // Owner spec (chown, write) e.g. "idx:idx"
 	When     When          // Condition for execution
 	Loop     []string      // Items to loop over
 	Ignore   bool          // Ignore errors

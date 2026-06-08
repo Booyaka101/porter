@@ -978,3 +978,79 @@ func TestManageServiceFiles(t *testing.T) {
 		t.Errorf("expected fifth task action 'sed', got '%s'", tasks[4].Action)
 	}
 }
+
+func TestDSL_WriteAttributes(t *testing.T) {
+	// Content stays in Body; mode/owner land in their own fields so they
+	// never clobber the file content (which a single shared Body would).
+	task := Write("/var/lib/idxgames/certs/device.key", "PEM").
+		Sudo().Mode("0600").Owner("idx:idx").Build()
+	if task.Action != "write" {
+		t.Errorf("expected action 'write', got '%s'", task.Action)
+	}
+	if task.Body != "PEM" {
+		t.Errorf("expected body 'PEM', got '%s'", task.Body)
+	}
+	if !task.Sudo {
+		t.Error("expected Sudo to be true")
+	}
+	if task.Perm != "0600" {
+		t.Errorf("expected perm '0600', got '%s'", task.Perm)
+	}
+	if task.Own != "idx:idx" {
+		t.Errorf("expected own 'idx:idx', got '%s'", task.Own)
+	}
+}
+
+func TestDSL_ModeOwnerFields(t *testing.T) {
+	// Mode/Owner write to Perm/Own (not Body), so Chmod/Chown still work and
+	// chaining them onto a Write does not destroy the content.
+	chmod := Chmod("/opt/app").Mode("755").Build()
+	if chmod.Perm != "755" {
+		t.Errorf("expected chmod perm '755', got '%s'", chmod.Perm)
+	}
+	if chmod.Body != "" {
+		t.Errorf("expected chmod body empty, got '%s'", chmod.Body)
+	}
+	chown := Chown("/opt/app").Owner("idx:idx").Build()
+	if chown.Own != "idx:idx" {
+		t.Errorf("expected chown own 'idx:idx', got '%s'", chown.Own)
+	}
+}
+
+func TestDSL_TrustCA(t *testing.T) {
+	task := TrustCA("/var/lib/idxgames/certs/ca.crt").Build()
+	if task.Action != "trust_ca" {
+		t.Errorf("expected action 'trust_ca', got '%s'", task.Action)
+	}
+	if task.Dest != "/var/lib/idxgames/certs/ca.crt" {
+		t.Errorf("expected dest cert path, got '%s'", task.Dest)
+	}
+	if task.Src != "" {
+		t.Errorf("expected no anchor by default, got '%s'", task.Src)
+	}
+	task = TrustCA("/x/ca.crt").As("idxgames-authority").Build()
+	if task.Src != "idxgames-authority" {
+		t.Errorf("expected anchor 'idxgames-authority', got '%s'", task.Src)
+	}
+}
+
+func TestSplitOwner(t *testing.T) {
+	cases := []struct {
+		in       string
+		user     string
+		group    string
+		hasGroup bool
+	}{
+		{"idx:idx", "idx", "idx", true},
+		{"idx", "idx", "", false},
+		{"idx:", "idx", "", false},
+		{"root:wheel", "root", "wheel", true},
+	}
+	for _, c := range cases {
+		user, group, hasGroup := splitOwner(c.in)
+		if user != c.user || group != c.group || hasGroup != c.hasGroup {
+			t.Errorf("splitOwner(%q) = (%q,%q,%v), want (%q,%q,%v)",
+				c.in, user, group, hasGroup, c.user, c.group, c.hasGroup)
+		}
+	}
+}
