@@ -218,11 +218,13 @@ func (e *Executor) run(cmd string) error {
 }
 
 // writeFile writes content to dest. With no sudo, mode, or owner it streams
-// straight to dest via a quoted heredoc (the original behavior). When any of
-// those is set, content is first staged in a private temp file — mktemp
-// creates it 0600, so secrets like private keys never sit world-readable —
-// and then placed into dest with the requested mode/owner before the temp is
-// removed.
+// straight to dest via a quoted heredoc (the original behavior). Otherwise the
+// content is first staged in a private temp (mktemp creates it 0600, so it is
+// never world-readable while staged) and then placed into dest: with a mode
+// set, install applies that mode atomically — pass .Mode("600") for a secret
+// such as a private key so dest itself is never world-readable; with only an
+// owner, dest is copied (default umask mode, like a plain write) then chowned.
+// The temp is always removed.
 func (e *Executor) writeFile(dest, content string, sudo bool, perm, owner string) error {
 	if !sudo && perm == "" && owner == "" {
 		return e.run("cat > " + dest + " <<'PORTER_EOF'\n" + content + "\nPORTER_EOF")
