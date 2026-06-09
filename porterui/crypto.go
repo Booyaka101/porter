@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -46,7 +47,9 @@ func DeriveKey(passphrase string) []byte {
 // Encrypt encrypts plaintext using AES-GCM
 func Encrypt(plaintext string) (string, error) {
 	if encryptionKey == nil {
-		return plaintext, nil // Fallback if encryption not initialized
+		// Fail closed: never silently persist plaintext. Callers must ensure
+		// InitEncryption ran at startup.
+		return "", ErrEncryptionNotInitialized
 	}
 
 	block, err := aes.NewCipher(encryptionKey)
@@ -68,15 +71,23 @@ func Encrypt(plaintext string) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// Decrypt decrypts ciphertext using AES-GCM
+// Decrypt decrypts ciphertext using AES-GCM.
+//
+// Backward compatibility: a value that does not even look encrypted (not valid
+// base64, or shorter than the GCM overhead, or — per IsEncrypted — below the
+// length threshold) is treated as legacy plaintext and returned as-is, so a
+// pre-encryption database still reads. But a value that DOES look encrypted yet
+// fails to authenticate (GCM open error) is NOT silently returned as plaintext
+// — that would mask a wrong key, corruption, or tampering and hand the caller
+// raw ciphertext as if it were the secret. Such a value fails closed.
 func Decrypt(ciphertext string) (string, error) {
 	if encryptionKey == nil {
-		return ciphertext, nil // Fallback if encryption not initialized
+		return "", ErrEncryptionNotInitialized
 	}
 
 	data, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
-		// Not encrypted, return as-is (for backward compatibility)
+		// Not base64 -> legacy plaintext.
 		return ciphertext, nil
 	}
 
@@ -91,16 +102,17 @@ func Decrypt(ciphertext string) (string, error) {
 	}
 
 	nonceSize := gcm.NonceSize()
-	if len(data) < nonceSize {
-		// Too short to be encrypted, return as-is
+	if len(data) < nonceSize || !IsEncrypted(ciphertext) {
+		// Too short / not long enough to be our ciphertext -> legacy plaintext.
 		return ciphertext, nil
 	}
 
 	nonce, ciphertextBytes := data[:nonceSize], data[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, ciphertextBytes, nil)
 	if err != nil {
-		// Decryption failed, might be plain text
-		return ciphertext, nil
+		// Looked encrypted but won't authenticate: fail closed, do not leak
+		// the ciphertext as if it were the plaintext.
+		return "", fmt.Errorf("decrypt failed (wrong key, corruption, or tampering): %w", err)
 	}
 
 	return string(plaintext), nil

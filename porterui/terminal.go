@@ -3,6 +3,7 @@ package porterui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/booyaka101/porter"
 	"io"
 	"log"
 	"net/http"
@@ -20,9 +21,7 @@ import (
 var terminalUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+	CheckOrigin:     checkWSOrigin,
 }
 
 // TerminalRecordingEvent represents a single event in a terminal recording
@@ -159,7 +158,7 @@ func TerminalRoutes(r *mux.Router) {
 			Auth: []ssh.AuthMethod{
 				ssh.Password(password),
 			},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			HostKeyCallback: porter.HostKeyCallback(),
 			Timeout:         10 * time.Second,
 		}
 

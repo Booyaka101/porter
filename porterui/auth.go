@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -107,8 +108,17 @@ func ensureDefaultAdmin() error {
 	}
 
 	if count == 0 {
-		// Create default admin user
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+		// Never ship a guessable default. Use PORTER_ADMIN_PASSWORD if set,
+		// otherwise generate a strong random one and print it ONCE so the
+		// operator can capture it and change it on first login.
+		password := os.Getenv("PORTER_ADMIN_PASSWORD")
+		generated := false
+		if password == "" {
+			password = randomPassword(24)
+			generated = true
+		}
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			return err
 		}
@@ -120,10 +130,28 @@ func ensureDefaultAdmin() error {
 		if err != nil {
 			return err
 		}
-		log.Println("Created default admin user (username: admin, password: admin)")
+		if generated {
+			log.Printf("Created default admin user (username: admin). GENERATED PASSWORD: %s  — store it now and change it after first login.", password)
+		} else {
+			log.Println("Created default admin user (username: admin) with password from PORTER_ADMIN_PASSWORD.")
+		}
 	}
 
 	return nil
+}
+
+// randomPassword returns a URL-safe random password with n bytes of entropy.
+func randomPassword(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// rand.Read essentially never fails; degrade to a timestamp-seeded
+		// value rather than a predictable constant.
+		ns := time.Now().UnixNano()
+		for i := range b {
+			b[i] = byte(ns >> (uint(i%8) * 8))
+		}
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // HashPassword hashes a password using bcrypt
@@ -349,10 +377,50 @@ func HasPermission(permissions []string, required string) bool {
 }
 
 // AuthMiddleware validates JWT tokens and adds user to context
+// publicAPIPrefixes are endpoints that must remain reachable without a JWT:
+// the login/status endpoints, and the machine-to-machine agent/build-client
+// channels which authenticate (or, today, don't) by their own scheme rather
+// than the user JWT. Protecting these with the user JWT would break agents.
+// TODO: give the agent channels a dedicated shared-secret/mTLS auth and drop
+// them from this allowlist.
+var publicAPIPrefixes = []string{
+	"/api/auth/login",
+	"/api/auth/status",
+	"/api/agent/",
+	"/api/standalone-agent/",
+	"/api/build-client/",
+}
+
+func isPublicAPIPath(path string) bool {
+	// Anything that isn't an /api call is the SPA / static assets — always public.
+	if !strings.HasPrefix(path, "/api/") {
+		return true
+	}
+	for _, p := range publicAPIPrefixes {
+		if path == p || strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// authEnabled reports whether JWT enforcement is turned on. Default off to
+// preserve existing trusted-LAN deployments; set PORTER_AUTH=1/true/yes to
+// enforce. Flipping the default to on is the recommended next step once the
+// agent channels (publicAPIPrefixes) get their own auth.
+func authEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("PORTER_AUTH"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip auth for login endpoint
-		if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" {
+		// Skip auth for static assets and the public API allowlist.
+		if isPublicAPIPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

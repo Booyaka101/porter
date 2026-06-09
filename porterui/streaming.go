@@ -189,7 +189,7 @@ func RunScriptWithStreaming(m *Machine, scriptPath, args, execID string, useSudo
 	var scriptCmd string
 	if useSudo {
 		// Admin users run as root with sudo
-		scriptCmd = fmt.Sprintf("cd ~ && echo '%s' | sudo -S bash %s %s 2>&1; echo \"EXIT_CODE:$?\"", cfg.Password, remotePath, cfg.Args)
+		scriptCmd = "cd ~ && " + sudoStdin(cfg.Password) + fmt.Sprintf("bash %s %s 2>&1; echo \"EXIT_CODE:$?\"", remotePath, cfg.Args)
 	} else {
 		// Operator users run as regular user (no sudo)
 		scriptCmd = fmt.Sprintf("cd ~ && bash %s %s 2>&1; echo \"EXIT_CODE:$?\"", remotePath, cfg.Args)
@@ -237,7 +237,7 @@ func executeWithStreamingSSH(m *Machine, cmd, execID string) (string, error) {
 		Auth: []ssh.AuthMethod{
 			ssh.Password(m.Password),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: porter.HostKeyCallback(),
 		Timeout:         5 * time.Minute,
 	}
 

@@ -277,7 +277,13 @@ func Run(config RunConfig) {
 		Silence: false,
 	}
 
-	SetupRoutes(server.Router)
+	if authEnabled() {
+		log.Println("[porter] authentication ENABLED (PORTER_AUTH) — /api requires a valid token")
+		SetupRoutesWithAuth(server.Router)
+	} else {
+		log.Println("[porter] WARNING: authentication is DISABLED — every endpoint (remote command exec, terminal, file write) is reachable without a token. Set PORTER_AUTH=1 to enforce auth. Do NOT expose this beyond a trusted network.")
+		SetupRoutes(server.Router)
+	}
 
 	// Add custom routes from wrapper
 	if config.CustomRoutes != nil {

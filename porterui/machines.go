@@ -1164,7 +1164,7 @@ func runCommandOnMachine(m *Machine, command string, useSudo bool) ExecutionResu
 	var cmdWithExitCode string
 	if useSudo {
 		// Admin users run with sudo (as root)
-		cmdWithExitCode = fmt.Sprintf("echo '%s' | sudo -S %s 2>&1; echo \"EXIT_CODE:$?\"", m.Password, command)
+		cmdWithExitCode = sudoStdin(m.Password) + fmt.Sprintf("%s 2>&1; echo \"EXIT_CODE:$?\"", command)
 	} else {
 		// Operator users run as regular user (no sudo)
 		cmdWithExitCode = fmt.Sprintf("%s 2>&1; echo \"EXIT_CODE:$?\"", command)
@@ -1253,11 +1253,11 @@ func uploadFileWithPorter(m *Machine, localPath, destPath, permissions, owner st
 			return result
 		}
 	} else {
-		// Windows: Use SCP command directly
-		// scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localfile user@host:remotepath
+		// Windows: Use SCP command directly. accept-new pins an unknown host on
+		// first use but refuses a changed key (TOFU) — never blindly accept like
+		// StrictHostKeyChecking=no, and don't discard known_hosts to /dev/null.
 		scpCmd := exec.Command("scp",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "UserKnownHostsFile=NUL",
+			"-o", "StrictHostKeyChecking=accept-new",
 			localPath,
 			fmt.Sprintf("%s@%s:%s", m.Username, m.IP, destPath),
 		)
@@ -1532,7 +1532,7 @@ func BuildUploadManifest(cfg ScriptDeployConfig) []porter.Task {
 // BuildExecuteManifest creates the script execution manifest
 func BuildExecuteManifest(cfg ScriptDeployConfig) []porter.Task {
 	remotePath := fmt.Sprintf("%s/%s", cfg.RemoteScriptDir, cfg.ScriptName)
-	scriptCmd := fmt.Sprintf("cd ~ && echo '%s' | sudo -S bash %s %s 2>&1; echo \"EXIT_CODE:$?\"", cfg.Password, remotePath, cfg.Args)
+	scriptCmd := "cd ~ && " + sudoStdin(cfg.Password) + fmt.Sprintf("bash %s %s 2>&1; echo \"EXIT_CODE:$?\"", remotePath, cfg.Args)
 
 	return porter.Tasks(
 		porter.Chmod(remotePath).Mode("755").Name("Make script executable"),

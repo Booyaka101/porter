@@ -124,7 +124,7 @@ func MultiTerminalRoutes(r *mux.Router) {
 				cmd := reqBody.Command
 				if runAsSudo {
 					password := GetDecryptedPassword(m)
-					cmd = fmt.Sprintf("echo '%s' | sudo -S %s", password, reqBody.Command)
+					cmd = sudoStdin(password) + reqBody.Command
 				}
 
 				output, err := client.Run(cmd)

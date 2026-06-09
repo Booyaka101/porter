@@ -2,6 +2,7 @@ package porterui
 
 import (
 	"fmt"
+	"github.com/booyaka101/porter"
 	"os/exec"
 	"time"
 
@@ -38,7 +39,7 @@ func NewSSHClient(cfg SSHConfig) *SSHClient {
 		Auth: []ssh.AuthMethod{
 			ssh.Password(cfg.Password),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: porter.HostKeyCallback(),
 		Timeout:         cfg.Timeout,
 	}
 
@@ -79,7 +80,7 @@ func (c *SSHClient) RunCommand(cmd string) (string, error) {
 
 // RunCommandWithSudo executes a command with sudo
 func (c *SSHClient) RunCommandWithSudo(cmd, password string) (string, error) {
-	sudoCmd := fmt.Sprintf("echo '%s' | sudo -S %s 2>&1", password, cmd)
+	sudoCmd := sudoStdin(password) + fmt.Sprintf("%s 2>&1", cmd)
 	return c.RunCommand(sudoCmd)
 }
 

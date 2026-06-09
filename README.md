@@ -68,6 +68,23 @@ func main() {
 - **Template Expansion** - Variable substitution in files and commands
 - **Idempotent Operations** - Skip tasks when target path exists with `Creates()`
 
+### Modern (2026) capabilities
+
+- **Verified host keys** - TOFU by default (pins on first use, rejects changed keys as MITM); `SetHostKeyMode(HostKeyStrict)` and `TrustHostCA()` for step-ca host certificates. No more `InsecureIgnoreHostKey`.
+- **SSH certificate auth** - `ConnectWithCert()` for short-lived certs (step-ca / Vault SSH / Teleport); keepalives via `StartKeepalive()`; non-default `Config.Port`.
+- **Declarative state** - `EnsureFile/EnsureDir/EnsureSymlink/EnsurePackage/EnsureLine/EnsureServiceRunning/EnsureServiceEnabled` gather a fact, diff, and **no-op when already converged** (pyinfra-style). A real `SetDryRun(true)` previews exactly what would change.
+- **Atomic releases & rollback** - `NewRelease(base).HealthCheck(cmd).Deploy(...)` deploys into a timestamped dir, health-checks, then flips `current` via an atomic `rename(2)`; `Rollback(base)` reverts in one step. (Kamal-style, but for plain systemd/VM targets.)
+- **Deploy-as-a-trace** - `SetTracer(NewTracer(w, env, service))` records each deploy as an OpenTelemetry-shaped span tree (JSONL); `SetLogger()` adds structured logs with `trace_id` correlation.
+- **Secrets (SOPS+age)** - `Secret(sopsFile, dest)` decrypts locally and ships the plaintext over SFTP at `0600` — never in a shell command, never logged.
+- **Supply-chain gate** - `VerifyBlob`/`VerifyImage` run `cosign verify` as a pre-deploy admission gate; an unsigned/untampered-failed artifact aborts the deploy.
+- **Meaningful change accounting** - the RECAP `changed=` count now reflects real mutations (read-only and converged tasks report `ok`, not `changed`).
+
+See [`examples/modern/main.go`](examples/modern/main.go) for an end-to-end deploy using all of the above.
+
+### Web UI security
+
+The dashboard now enforces JWT auth when `PORTER_AUTH=1` (wiring previously didn't apply the middleware); WebSocket upgrades are origin-checked (`PORTER_ALLOWED_ORIGINS` for cross-origin frontends); stored credentials encrypt/decrypt **fail closed**; the default admin password is random (or `PORTER_ADMIN_PASSWORD`), logged once.
+
 ## DSL Reference
 
 ### File Operations

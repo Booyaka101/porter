@@ -597,7 +597,7 @@ func SystemRoutes(r *mux.Router) {
 
 		// Use password for sudo
 		password := GetDecryptedPassword(machine)
-		sudoCmd := "echo '" + password + "' | sudo -S docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.CreatedAt}}|{{.State}}' 2>/dev/null"
+		sudoCmd := sudoStdin(password) + "docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.CreatedAt}}|{{.State}}' 2>/dev/null"
 		output, err := client.Run(sudoCmd)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -648,7 +648,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		output, err := client.Run("echo '" + password + "' | sudo -S docker images --format '{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}' 2>/dev/null")
+		output, err := client.Run(sudoStdin(password) + "docker images --format '{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}' 2>/dev/null")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{"images": []interface{}{}})
@@ -693,7 +693,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		output, err := client.Run("echo '" + password + "' | sudo -S docker volume ls --format '{{.Name}}|{{.Driver}}|{{.Mountpoint}}' 2>/dev/null")
+		output, err := client.Run(sudoStdin(password) + "docker volume ls --format '{{.Name}}|{{.Driver}}|{{.Mountpoint}}' 2>/dev/null")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{"volumes": []interface{}{}})
@@ -739,7 +739,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		output, err := client.Run("echo '" + password + "' | sudo -S docker network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}' 2>/dev/null")
+		output, err := client.Run(sudoStdin(password) + "docker network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}' 2>/dev/null")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{"networks": []interface{}{}})
@@ -793,7 +793,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		password := GetDecryptedPassword(machine)
-		output, err := client.Run("echo '" + password + "' | sudo -S docker info --format '{{.Containers}}|{{.ContainersRunning}}|{{.Images}}' 2>/dev/null")
+		output, err := client.Run(sudoStdin(password) + "docker info --format '{{.Containers}}|{{.ContainersRunning}}|{{.Images}}' 2>/dev/null")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": "Failed to get Docker info: " + err.Error(),
@@ -832,7 +832,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		sudoPrefix := "echo '" + password + "' | sudo -S "
+		sudoPrefix := sudoStdin(password)
 
 		var cmd string
 		switch action {
@@ -936,7 +936,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		sudoPrefix := "echo '" + password + "' | sudo -S "
+		sudoPrefix := sudoStdin(password)
 
 		var cmd string
 		switch action {
@@ -978,7 +978,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		sudoPrefix := "echo '" + password + "' | sudo -S "
+		sudoPrefix := sudoStdin(password)
 
 		var cmd string
 		switch pruneType {
@@ -1029,7 +1029,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		_, err = client.Run("echo '" + password + "' | sudo -S docker pull " + request.Image + " 2>&1")
+		_, err = client.Run(sudoStdin(password) + "docker pull " + request.Image + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1107,7 +1107,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 		cmd += " " + request.Image
 
-		output, err := client.Run("echo '" + password + "' | sudo -S " + cmd + " 2>&1")
+		output, err := client.Run(sudoStdin(password) + cmd + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1136,7 +1136,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		output, err := client.Run("echo '" + password + "' | sudo -S docker inspect " + containerID + " 2>/dev/null")
+		output, err := client.Run(sudoStdin(password) + "docker inspect " + containerID + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1170,7 +1170,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		output, err := client.Run("echo '" + password + "' | sudo -S docker stats " + containerID + " --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}' 2>/dev/null")
+		output, err := client.Run(sudoStdin(password) + "docker stats " + containerID + " --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}' 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1215,7 +1215,7 @@ func SystemRoutes(r *mux.Router) {
 		if driver == "" {
 			driver = "local"
 		}
-		_, err = client.Run("echo '" + password + "' | sudo -S docker volume create --driver " + driver + " " + request.Name + " 2>&1")
+		_, err = client.Run(sudoStdin(password) + "docker volume create --driver " + driver + " " + request.Name + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1244,7 +1244,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		_, err = client.Run("echo '" + password + "' | sudo -S docker volume rm " + volumeName + " 2>/dev/null")
+		_, err = client.Run(sudoStdin(password) + "docker volume rm " + volumeName + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1283,7 +1283,7 @@ func SystemRoutes(r *mux.Router) {
 		if driver == "" {
 			driver = "bridge"
 		}
-		_, err = client.Run("echo '" + password + "' | sudo -S docker network create --driver " + driver + " " + request.Name + " 2>&1")
+		_, err = client.Run(sudoStdin(password) + "docker network create --driver " + driver + " " + request.Name + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1312,7 +1312,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		_, err = client.Run("echo '" + password + "' | sudo -S docker network rm " + networkID + " 2>/dev/null")
+		_, err = client.Run(sudoStdin(password) + "docker network rm " + networkID + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
@@ -1341,7 +1341,7 @@ func SystemRoutes(r *mux.Router) {
 		defer client.Close()
 
 		password := GetDecryptedPassword(machine)
-		_, err = client.Run("echo '" + password + "' | sudo -S docker rmi " + imageID + " 2>/dev/null")
+		_, err = client.Run(sudoStdin(password) + "docker rmi " + imageID + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})

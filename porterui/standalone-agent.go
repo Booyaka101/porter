@@ -165,9 +165,7 @@ func connectToAgent(machineID, ip string, port int) {
 }
 
 var standaloneUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for agent connections
-	},
+	CheckOrigin: checkWSOrigin,
 }
 
 // SetupStandaloneAgentRoutes sets up the standalone agent-related routes

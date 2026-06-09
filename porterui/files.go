@@ -179,7 +179,7 @@ func FilesRoutes(r *mux.Router) {
 
 		if isSystemdFile && !isUserService {
 			// System service - needs sudo to write
-			writeCmd = fmt.Sprintf("echo '%s' | sudo -S bash -c \"cat > '%s' << 'PORTER_EOF'\n%s\nPORTER_EOF\"", password, request.Path, escapedContent)
+			writeCmd = sudoStdin(password) + fmt.Sprintf("bash -c \"cat > '%s' << 'PORTER_EOF'\n%s\nPORTER_EOF\"", request.Path, escapedContent)
 		} else {
 			writeCmd = fmt.Sprintf("cat > '%s' << 'PORTER_EOF'\n%s\nPORTER_EOF", request.Path, escapedContent)
 		}
@@ -208,13 +208,13 @@ func FilesRoutes(r *mux.Router) {
 				}
 			} else {
 				// System service - use sudo systemctl
-				daemonReloadCmd := fmt.Sprintf("echo '%s' | sudo -S systemctl daemon-reload", password)
+				daemonReloadCmd := sudoStdin(password) + "systemctl daemon-reload"
 				output, reloadErr := client.Run(daemonReloadCmd)
 				systemdOutput = string(output)
 
 				// Try to restart the service if it exists and is a .service file
 				if reloadErr == nil && strings.HasSuffix(serviceName, ".service") {
-					restartCmd := fmt.Sprintf("echo '%s' | sudo -S systemctl restart %s 2>&1 || echo 'Service not active, skipping restart'", password, serviceName)
+					restartCmd := sudoStdin(password) + fmt.Sprintf("systemctl restart %s 2>&1 || echo 'Service not active, skipping restart'", serviceName)
 					restartOutput, _ := client.Run(restartCmd)
 					systemdOutput += "\n" + string(restartOutput)
 				}

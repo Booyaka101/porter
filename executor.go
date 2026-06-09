@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,14 @@ type Executor struct {
 	verbose    bool
 	dryRun     bool
 	onProgress ProgressFunc
+	tracer     *Tracer
+	rootSpanID string
+	logger     *slog.Logger
+
+	// noOp is set by an action that determined the remote was already in the
+	// desired state and did nothing (the Ensure* primitives). It is reset
+	// before every dispatch and read by exec to report "ok, unchanged".
+	noOp bool
 }
 
 // NewExecutor creates a new Executor.
@@ -35,12 +44,51 @@ func (e *Executor) SetDryRun(v bool) *Executor { e.dryRun = v; return e }
 // OnProgress sets a callback function that is called for each task state change.
 func (e *Executor) OnProgress(fn ProgressFunc) *Executor { e.onProgress = fn; return e }
 
+// SetTracer attaches a Tracer so the deploy is recorded as a trace (one root
+// span per Run, one child span per task). Pass nil to disable.
+func (e *Executor) SetTracer(t *Tracer) *Executor { e.tracer = t; return e }
+
+// SetLogger attaches a structured logger. One record is emitted per task at
+// completion (action, status, changed, duration, and the trace_id when a
+// Tracer is set — enabling log<->trace correlation). Pass nil to disable.
+func (e *Executor) SetLogger(l *slog.Logger) *Executor { e.logger = l; return e }
+
+// logTask emits a structured record for a completed task, if a logger is set.
+func (e *Executor) logTask(p TaskProgress) {
+	if e.logger == nil {
+		return
+	}
+	attrs := []any{
+		"action", p.Action,
+		"name", p.Name,
+		"status", string(p.Status),
+		"attempt", p.Attempt,
+		"duration_ms", p.Duration.Milliseconds(),
+	}
+	if tid := e.tracer.TraceID(); tid != "" {
+		attrs = append(attrs, "trace_id", tid)
+	}
+	if p.Error != nil {
+		attrs = append(attrs, "error", p.Error.Error())
+	}
+	e.logger.Info("porter.task", attrs...)
+}
+
 // Run executes a list of tasks.
 func (e *Executor) Run(name string, tasks []Task, vars *Vars) (*Stats, error) {
 	stats := &Stats{Total: len(tasks)}
 
 	if e.verbose {
 		log.Printf("\n\033[1;36mPLAY [%s]\033[0m\n", name)
+	}
+
+	root := e.tracer.StartSpan("deploy "+name, "")
+	if root != nil {
+		root.SetAttribute("porter.task_count", len(tasks))
+		if e.client != nil {
+			root.SetAttribute("server.address", e.client.Config.Addr)
+		}
+		e.rootSpanID = root.ID()
 	}
 
 	for i, task := range tasks {
@@ -111,6 +159,10 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 		StartTime:  time.Now(),
 	}
 
+	// Emit one structured log record per task at completion, with the final
+	// status the function leaves on `progress`.
+	defer func() { e.logTask(progress) }()
+
 	if e.verbose {
 		mode := ""
 		if e.dryRun {
@@ -123,8 +175,17 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 	e.emitProgress(progress)
 
 	if e.dryRun {
+		changed, detail := e.preview(task, vars)
 		stats.OK++
-		progress.Status = StatusOK
+		if changed {
+			stats.Changed++
+			progress.Status = StatusChanged
+		} else {
+			progress.Status = StatusOK
+		}
+		if e.verbose && detail != "" {
+			log.Printf("  \033[35m%s\033[0m", detail)
+		}
 		progress.Duration = time.Since(progress.StartTime)
 		e.emitProgress(progress)
 		return nil
@@ -147,9 +208,15 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 
 	// Execute with retry support
 	var err error
+	var changed bool
 	delay := task.Delay
 	if delay == 0 {
 		delay = 2 * time.Second
+	}
+
+	span := e.tracer.StartSpan(task.Action+" "+name, e.rootSpanID)
+	if span != nil {
+		span.SetAttribute("porter.action", task.Action)
 	}
 
 	for i := 0; i < maxAttempts; i++ {
@@ -168,11 +235,17 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 			e.emitProgress(progress)
 		}
 
-		err = e.exec(task, vars)
+		changed, err = e.exec(task, vars)
 		if err == nil {
 			break
 		}
 		progress.Error = err
+	}
+
+	if span != nil {
+		span.SetAttribute("porter.attempts", progress.Attempt)
+		span.SetAttribute("porter.changed", changed && err == nil)
+		span.End(err)
 	}
 
 	progress.Duration = time.Since(progress.StartTime)
@@ -198,8 +271,12 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 	}
 
 	stats.OK++
-	stats.Changed++
-	progress.Status = StatusChanged
+	if changed {
+		stats.Changed++
+		progress.Status = StatusChanged
+	} else {
+		progress.Status = StatusOK
+	}
 	e.emitProgress(progress)
 	return nil
 }
@@ -209,7 +286,11 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 // =============================================================================
 
 func (e *Executor) sudo(cmd string) string {
-	return "echo " + e.password + " | sudo -S " + cmd
+	// Feed the password to sudo over stdin via printf (a shell builtin, so it
+	// never lands in the remote process table) and shell-quote it so embedded
+	// metacharacters can neither break the command nor inject shell. -p ''
+	// suppresses the prompt that would otherwise pollute stdout.
+	return "printf '%s\\n' " + shellEscape(e.password) + " | sudo -S -p '' " + cmd
 }
 
 func (e *Executor) run(cmd string) error {
@@ -298,6 +379,22 @@ func (e *Executor) runSudo(cmd string) error {
 	return e.run(e.sudo(cmd))
 }
 
+// runMaybeSudo runs cmd under sudo only when sudo is true.
+func (e *Executor) runMaybeSudo(sudo bool, cmd string) error {
+	if sudo {
+		return e.runSudo(cmd)
+	}
+	return e.run(cmd)
+}
+
+// runCaptureMaybeSudo captures cmd output, under sudo only when sudo is true.
+func (e *Executor) runCaptureMaybeSudo(sudo bool, cmd string) (string, error) {
+	if sudo {
+		return e.runSudoCapture(cmd)
+	}
+	return e.runCapture(cmd)
+}
+
 func (e *Executor) runCapture(cmd string) (string, error) {
 	out, err := e.client.Run(cmd)
 	return strings.TrimSpace(string(out)), err
@@ -336,7 +433,41 @@ func (e *Executor) getSSHDestination() string {
 // ACTION DISPATCHER
 // =============================================================================
 
-func (e *Executor) exec(t Task, vars *Vars) error {
+// readOnlyActions never mutate the remote — running them is not a "change".
+// Everything not listed is treated as mutating (the safe default for an
+// imperative action). The Ensure* primitives report no-op dynamically via
+// e.noOp instead of appearing here.
+var readOnlyActions = map[string]bool{
+	"cat": true, "read_file": true, "capture": true, "capture_sudo": true,
+	"file_exists": true, "dir_exists": true, "service_running": true,
+	"wait_port": true, "wait_http": true, "wait_file": true, "pause": true,
+	"disk_space": true, "memory_info": true, "cpu_info": true, "load_average": true,
+	"command_exists": true, "nproc": true, "sysinfo": true,
+	"require_disk": true, "require_memory": true, "require_command": true,
+	"docker_ps": true, "docker_images": true, "docker_volumes": true,
+	"docker_networks": true, "docker_info": true,
+	"compose_ps": true, "compose_logs": true, "compose_top": true,
+	"svc_status": true, "svc_list": true, "svc_timers": true,
+	"journal": true, "journal_unit": true, "git_describe": true,
+	"ping": true, "curl": true, "wget": true,
+	"verify_blob": true, "verify_image": true,
+}
+
+// exec runs the action and reports whether it changed remote state. A
+// read-only action, or an Ensure* primitive that found the host already
+// converged (e.noOp), counts as ok-but-unchanged.
+func (e *Executor) exec(t Task, vars *Vars) (bool, error) {
+	e.noOp = false
+	if err := e.dispatch(t, vars); err != nil {
+		return false, err
+	}
+	if e.noOp || readOnlyActions[t.Action] {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (e *Executor) dispatch(t Task, vars *Vars) error {
 	src := vars.Expand(t.Src)
 	dest := vars.Expand(t.Dest)
 	body := vars.Expand(t.Body)
@@ -391,6 +522,68 @@ func (e *Executor) exec(t Task, vars *Vars) error {
 			return err
 		}
 		return e.runSudo("chmod +x " + dest)
+
+	// Declarative state primitives (fact-gather -> diff -> no-op)
+	case "ensure_file":
+		if e.fileConverged(dest, body, t.Sudo) {
+			e.noOp = true
+			return nil
+		}
+		return e.writeFile(dest, body, t.Sudo, perm, own)
+	case "ensure_dir":
+		if e.dirExists(dest) {
+			e.noOp = true
+			return nil
+		}
+		return e.runMaybeSudo(t.Sudo, "mkdir -p "+shellEscape(dest))
+	case "ensure_symlink":
+		if e.symlinkPointsAt(dest, src) {
+			e.noOp = true
+			return nil
+		}
+		return e.runMaybeSudo(t.Sudo, "ln -sfn "+shellEscape(src)+" "+shellEscape(dest))
+	case "ensure_package":
+		if e.packageInstalled(dest) {
+			e.noOp = true
+			return nil
+		}
+		return e.runSudo("DEBIAN_FRONTEND=noninteractive apt-get install -y " + shellEscape(dest))
+	case "ensure_line":
+		if e.linePresent(dest, body, t.Sudo) {
+			e.noOp = true
+			return nil
+		}
+		appendCmd := "printf '%s\\n' " + shellEscape(body) + " >> " + shellEscape(dest)
+		if t.Sudo {
+			return e.runSudo("sh -c " + shellEscape(appendCmd))
+		}
+		return e.run(appendCmd)
+	case "ensure_service_running":
+		if e.serviceActive(dest, t.User) {
+			e.noOp = true
+			return nil
+		}
+		sc, sudo := systemctlPrefix(t.User)
+		return e.runMaybeSudo(sudo, sc+"start "+shellEscape(dest))
+	case "ensure_service_enabled":
+		if e.serviceEnabled(dest, t.User) {
+			e.noOp = true
+			return nil
+		}
+		sc, sudo := systemctlPrefix(t.User)
+		return e.runMaybeSudo(sudo, sc+"enable "+shellEscape(dest))
+
+	// Secrets & supply-chain verification
+	case "secret":
+		plain, err := decryptSops(src)
+		if err != nil {
+			return err
+		}
+		return e.sftpWriteSecret(dest, plain, perm, own, t.Sudo)
+	case "verify_blob":
+		return cosignVerify("verify-blob", body, src)
+	case "verify_image":
+		return cosignVerify("verify", body, src)
 
 	// Command execution
 	case "run":
@@ -1253,6 +1446,41 @@ func (e *Executor) sftpWrite(path string, data []byte) error {
 	return nil
 }
 
+// sftpWriteSecret writes secret data to dest over SFTP, applying the mode
+// BEFORE writing the bytes so the plaintext is never briefly world-readable,
+// then optionally chowns. perm defaults to 0600. The plaintext is never placed
+// in a shell command or logged.
+func (e *Executor) sftpWriteSecret(dest string, data []byte, perm, owner string, sudo bool) error {
+	ftp, err := e.client.NewSftp()
+	if err != nil {
+		return fmt.Errorf("sftp session failed: %w", err)
+	}
+	defer ftp.Close()
+
+	mode := parseFileMode(perm, 0o600)
+
+	file, err := ftp.Create(dest)
+	if err != nil {
+		return fmt.Errorf("create remote secret failed: %w", err)
+	}
+	// Tighten permissions before any bytes land.
+	if err := ftp.Chmod(dest, mode); err != nil {
+		file.Close()
+		return fmt.Errorf("chmod remote secret failed: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return fmt.Errorf("write remote secret failed: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close remote secret failed: %w", err)
+	}
+	if owner != "" {
+		return e.runMaybeSudo(sudo, "chown "+owner+" "+shellEscape(dest))
+	}
+	return nil
+}
+
 // =============================================================================
 // GO BUILD HELPERS
 // =============================================================================
@@ -1582,11 +1810,17 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 		if sshKey != "" {
 			sshCmd += " -i " + sshKey
 		}
-		sshCmd += " -o StrictHostKeyChecking=no"
+		sshCmd += " -o StrictHostKeyChecking=" + sshStrictOption()
+		if kh := knownHostsFile(); kh != "" {
+			sshCmd += " -o UserKnownHostsFile=" + shellEscape(kh)
+		}
 
-		// Use sshpass if password is available and no SSH key specified
+		// Use sshpass if password is available and no SSH key specified.
+		// Pass the password via the SSHPASS env var (sshpass -e) rather than
+		// -p, so it never appears in the local process argv, and shell-quote
+		// it. Prefer key/cert auth — password+sshpass remains a fallback.
 		if e.password != "" && sshKey == "" {
-			cmd = "sshpass -p '" + e.password + "' " + cmd + " -e \"" + sshCmd + "\""
+			cmd = "SSHPASS=" + shellEscape(e.password) + " sshpass -e " + cmd + " -e \"" + sshCmd + "\""
 		} else {
 			cmd += " -e \"" + sshCmd + "\""
 		}

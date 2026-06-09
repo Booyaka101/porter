@@ -43,44 +43,13 @@ func SetupRoutes(r *mux.Router) {
 	AIAgentDebugRoutes(r)
 }
 
-// SetupRoutesWithAuth sets up routes with authentication middleware
+// SetupRoutesWithAuth registers every route and enforces JWT authentication on
+// them via AuthMiddleware. The middleware self-filters: static/SPA paths and
+// the public allowlist (login, status, agent channels — see publicAPIPrefixes)
+// pass through; every other /api/* call requires a valid token. Because the
+// middleware decides per-request, the routes can be registered exactly as in
+// SetupRoutes — no /api subrouter (which would double the prefix).
 func SetupRoutesWithAuth(r *mux.Router) {
-	// Auth routes (no auth required for login/status)
-	AuthRoutes(r)
-
-	// Create a subrouter for authenticated routes
-	api := r.PathPrefix("/api").Subrouter()
-	api.Use(AuthMiddleware)
-
-	// User management routes
-	UserRoutes(r)
-
-	// All other routes (will be protected by middleware when using this setup)
-	ScriptsRoutes(r)
-	MachinesRoutes(r)
-	ManifestRoutes(r)
-	HistoryRoutes(r)
-	HealthRoutes(r)
-	SchedulerRoutes(r)
-	NotificationRoutes(r)
-	StreamingRoutes(r)
-	CustomScriptsRoutes(r)
-	LogsRoutes(r)
-	SystemRoutes(r)
-	FilesRoutes(r)
-	SystemToolsRoutes(r)
-	TerminalRoutes(r)
-	BookmarkRoutes(r)
-	VNCRoutes(r)
-	WOLRoutes(r)
-	NetworkToolsRoutes(r)
-	SSHKeyRoutes(r)
-	BackupRoutes(r)
-	DiffRoutes(r)
-	MultiTerminalRoutes(r)
-	ImportExportRoutes(r)
-	DashboardWSRoutes(r)
-	BuildClientRoutes(r)
-	AIAgentRoutes(r)
-	AIAgentDebugRoutes(r)
+	r.Use(AuthMiddleware)
+	SetupRoutes(r)
 }

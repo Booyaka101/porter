@@ -56,9 +56,7 @@ type AgentStore struct {
 var agentStore = &AgentStore{
 	agents: make(map[string]*AgentConnection),
 	upgrader: websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			return true // Allow all origins for agents
-		},
+		CheckOrigin:     checkWSOrigin,
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	},

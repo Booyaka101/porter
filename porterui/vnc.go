@@ -139,7 +139,7 @@ var (
 	vncUpgrader   = websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
-		CheckOrigin:     func(r *http.Request) bool { return true },
+		CheckOrigin:     checkWSOrigin,
 	}
 )
 

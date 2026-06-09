@@ -12,6 +12,10 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null)
+    // authDisabled is true ONLY when the backend explicitly reports auth is
+    // turned off server-side (status 404 == no auth DB). It is never inferred
+    // from errors or unexpected responses — those fail closed.
+    const [authDisabled, setAuthDisabled] = useState(false)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
 
@@ -19,37 +23,44 @@ export const AuthProvider = ({ children }) => {
     const checkAuth = useCallback(async () => {
         try {
             const res = await fetch('/api/auth/status')
-            
-            // If auth endpoint returns 404, auth is not enabled - allow access
+
+            // 404 == backend reports auth is NOT enabled (no auth DB).
+            // This is the only path that grants access without a login, and it
+            // does so WITHOUT fabricating an admin user — no user object, just
+            // an explicit "auth disabled, access allowed" mode.
             if (res.status === 404) {
-                // Auth not enabled, create a fake admin user for full access
-                setUser({
-                    id: 'local',
-                    username: 'local',
-                    role: 'admin',
-                    permissions: ['*'],
-                    display_name: 'Local User'
-                })
+                setUser(null)
+                setAuthDisabled(true)
                 setLoading(false)
                 return
             }
-            
+
+            // Any non-OK status (401/403/5xx/etc.) means auth IS enabled and the
+            // session is not valid (or the server is unhealthy). Fail closed.
+            if (!res.ok) {
+                setUser(null)
+                setAuthDisabled(false)
+                setLoading(false)
+                return
+            }
+
             const data = await res.json()
-            if (data.authenticated && data.user) {
+            // Only an explicit authenticated:true with a real user object grants
+            // access. Anything else (authenticated:false, missing user, malformed
+            // payload) is treated as unauthenticated → login screen.
+            if (data && data.authenticated === true && data.user) {
                 setUser(data.user)
+                setAuthDisabled(false)
             } else {
                 setUser(null)
+                setAuthDisabled(false)
             }
         } catch (err) {
             console.error('Auth check failed:', err)
-            // On network error, assume auth is not enabled
-            setUser({
-                id: 'local',
-                username: 'local',
-                role: 'admin',
-                permissions: ['*'],
-                display_name: 'Local User'
-            })
+            // Network error or unparseable response → fail closed.
+            // NEVER fabricate a user or assume auth is disabled here.
+            setUser(null)
+            setAuthDisabled(false)
         } finally {
             setLoading(false)
         }
@@ -71,6 +82,7 @@ export const AuthProvider = ({ children }) => {
             
             if (data.success && data.user) {
                 setUser(data.user)
+                setAuthDisabled(false)
                 return { success: true }
             } else {
                 setError(data.error || 'Login failed')
@@ -93,8 +105,11 @@ export const AuthProvider = ({ children }) => {
     }
 
     const hasPermission = (permission) => {
+        // When the backend has explicitly disabled auth, there is no permission
+        // system to enforce client-side — allow everything so the app functions.
+        if (authDisabled) return true
         if (!user || !user.permissions) return false
-        return user.permissions.includes('*') || 
+        return user.permissions.includes('*') ||
                user.permissions.includes(permission) ||
                user.permissions.some(p => {
                    if (p.endsWith(':*')) {
@@ -105,10 +120,14 @@ export const AuthProvider = ({ children }) => {
                })
     }
 
-    const isAdmin = () => user?.role === 'admin'
-    const isOperator = () => user?.role === 'operator' || user?.role === 'admin'
-    const isViewer = () => user?.role === 'viewer'
-    const isViewerOnly = () => user?.role === 'viewer'
+    // When auth is disabled server-side there is no role boundary to enforce,
+    // so the app behaves as fully privileged (but note: user stays null — no
+    // fabricated admin identity). On error/unauthenticated, authDisabled is
+    // false and these all return false (fail closed).
+    const isAdmin = () => authDisabled || user?.role === 'admin'
+    const isOperator = () => authDisabled || user?.role === 'operator' || user?.role === 'admin'
+    const isViewer = () => !authDisabled && user?.role === 'viewer'
+    const isViewerOnly = () => !authDisabled && user?.role === 'viewer'
 
     const canWrite = (resource) => hasPermission(`${resource}:write`) || hasPermission('*')
     const canRead = (resource) => hasPermission(`${resource}:read`) || hasPermission('*')
@@ -124,6 +143,7 @@ export const AuthProvider = ({ children }) => {
 
     const value = {
         user,
+        authDisabled,
         loading,
         error,
         login,
@@ -143,7 +163,10 @@ export const AuthProvider = ({ children }) => {
         canAccessTools,
         canRunCommands,
         hasSudoAccess,
-        isAuthenticated: !!user
+        // Authenticated for routing purposes when we have a real user OR the
+        // backend has explicitly disabled auth. Errors/unauthenticated states
+        // leave both false → login screen (fail closed).
+        isAuthenticated: !!user || authDisabled
     }
 
     return (

@@ -56,8 +56,9 @@ const AppRoutes = () => {
         )
     }
 
-    // If auth is not configured (no MySQL), allow access without login
-    // Check if auth endpoint returns 404 to determine if auth is enabled
+    // Fail closed: show the login screen unless we have a valid session OR the
+    // backend has explicitly reported that auth is disabled (both surface as
+    // isAuthenticated via AuthContext). Errors/unknown states => login screen.
     if (!isAuthenticated) {
         return <Login />
     }

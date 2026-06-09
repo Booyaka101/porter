@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/melbahja/goph"
-	"golang.org/x/crypto/ssh"
 )
 
 // ConnectWithKey establishes an SSH connection using a private key file.
@@ -27,7 +26,7 @@ func ConnectWithKey(ip string, user string, keyPath string, timeout time.Duratio
 		Port:     22,
 		Auth:     auth,
 		Timeout:  timeout,
-		Callback: ssh.InsecureIgnoreHostKey(),
+		Callback: HostKeyCallback(),
 	})
 }
 
@@ -48,7 +47,7 @@ func ConnectWithKeyAndPassphrase(ip string, user string, keyPath string, passphr
 		Port:     22,
 		Auth:     auth,
 		Timeout:  timeout,
-		Callback: ssh.InsecureIgnoreHostKey(),
+		Callback: HostKeyCallback(),
 	})
 }
 
@@ -69,7 +68,7 @@ func ConnectWithAgent(ip string, user string, timeout time.Duration) (*goph.Clie
 		Port:     22,
 		Auth:     auth,
 		Timeout:  timeout,
-		Callback: ssh.InsecureIgnoreHostKey(),
+		Callback: HostKeyCallback(),
 	})
 }
 
