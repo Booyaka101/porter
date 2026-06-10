@@ -1,4 +1,4 @@
-.PHONY: all build build-ui build-go clean run dev install build-all docker-build docker-run docker-stop docker-compose-up docker-compose-down docker-compose-mysql docker-clean
+.PHONY: all build build-ui ui build-go clean run dev install check test lint fmt build-all docker-build docker-run docker-stop docker-compose-up docker-compose-down docker-compose-mysql docker-clean
 
 # Default target
 all: build
@@ -6,13 +6,38 @@ all: build
 # Build everything (UI + Go binary)
 build: build-ui build-go
 
-# Build UI and copy to cmd/porter/build
+# Pre-commit gate: format check + vet + build + tests across the whole module.
+check: fmt vet
+	go build ./...
+	go test ./...
+
+test:
+	go test ./...
+
+# go vet across the module
+vet:
+	go vet ./...
+
+# Fail if any Go file is not gofmt-clean
+fmt:
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "These files are not gofmt-clean:"; gofmt -l .; exit 1; \
+	fi
+
+# Static analysis (matches CI). Requires golangci-lint.
+lint:
+	golangci-lint run ./...
+
+# Build the React UI and stage it for both the CLI and the standalone UI server.
+ui: build-ui
+
 build-ui:
 	@echo "Building UI..."
 	cd ui && npm install && npm run build
-	@echo "Copying UI build to cmd/porter..."
-	rm -rf cmd/porter/build
+	@echo "Staging UI build (cmd/porter + porterui embed)..."
+	rm -rf cmd/porter/build porterui/build
 	cp -r ui/build cmd/porter/build
+	cp -r ui/build porterui/build
 
 # Build Go binary
 build-go:

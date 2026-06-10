@@ -18,14 +18,14 @@ import (
 )
 
 type AIAgentConfig struct {
-	Provider           string                         `json:"provider"`
-	APIKey             string                         `json:"api_key,omitempty"`
-	Model              string                         `json:"model"`
-	BaseURL            string                         `json:"base_url,omitempty"`
-	SystemPrompt       string                         `json:"system_prompt,omitempty"`
-	ScriptDescriptions map[string]ScriptDescription   `json:"script_descriptions,omitempty"`
-	MaxTokens          int                            `json:"max_tokens,omitempty"`
-	Temperature        float64                        `json:"temperature,omitempty"`
+	Provider           string                       `json:"provider"`
+	APIKey             string                       `json:"api_key,omitempty"`
+	Model              string                       `json:"model"`
+	BaseURL            string                       `json:"base_url,omitempty"`
+	SystemPrompt       string                       `json:"system_prompt,omitempty"`
+	ScriptDescriptions map[string]ScriptDescription `json:"script_descriptions,omitempty"`
+	MaxTokens          int                          `json:"max_tokens,omitempty"`
+	Temperature        float64                      `json:"temperature,omitempty"`
 }
 
 type ScriptDescription struct {
@@ -85,9 +85,9 @@ type OllamaToolFunction struct {
 }
 
 type OllamaToolFunctionParameters struct {
-	Type       string                          `json:"type"`
-	Required   []string                        `json:"required"`
-	Properties map[string]OllamaToolProperty   `json:"properties"`
+	Type       string                        `json:"type"`
+	Required   []string                      `json:"required"`
+	Properties map[string]OllamaToolProperty `json:"properties"`
 }
 
 type OllamaToolProperty struct {
@@ -175,13 +175,13 @@ func GetAIAgentConfig() *AIAgentConfig {
 // ---------- Context gathering ----------
 
 var (
-	liveContextCache      = make(map[string]string)
-	liveContextCacheLock  sync.RWMutex
-	liveContextCacheTTL   = make(map[string]time.Time)
-	ipRegex               = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
-	sshSemaphore          = make(chan struct{}, 10)          // High-priority for HTTP handlers
-	bgSshSemaphore        = make(chan struct{}, 2)           // Low-priority for background tasks
-	cleanupOnce           sync.Once
+	liveContextCache     = make(map[string]string)
+	liveContextCacheLock sync.RWMutex
+	liveContextCacheTTL  = make(map[string]time.Time)
+	ipRegex              = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
+	sshSemaphore         = make(chan struct{}, 10) // High-priority for HTTP handlers
+	bgSshSemaphore       = make(chan struct{}, 2)  // Low-priority for background tasks
+	cleanupOnce          sync.Once
 )
 
 func resolveMachinesFromMessage(message string, allMachines []*Machine) []*Machine {

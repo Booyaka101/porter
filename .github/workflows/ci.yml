@@ -1,29 +1,34 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
-          cache: false
+          go-version-file: go.mod
+          cache: true
 
       - name: Verify dependencies
         run: go mod verify
 
-      - name: Build library
-        run: go build -v ./porterui/...
+      - name: Build
+        run: go build -v ./...
 
-      - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./porterui/...
+      - name: Test
+        run: go test -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -39,16 +44,21 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
-          cache: false
+          go-version-file: go.mod
+          cache: true
 
-      - name: Run go vet
-        run: go vet ./porterui/...
-
-      - name: Run go fmt check
+      - name: gofmt
         run: |
           if [ -n "$(gofmt -l .)" ]; then
-            echo "Go files are not formatted:"
+            echo "These files are not gofmt-clean:"
             gofmt -l .
             exit 1
           fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest

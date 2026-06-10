@@ -60,3 +60,9 @@ coverage.html
 
 # Logs
 *.log
+
+# Built UI assets (regenerate with `make ui`); keep the placeholder index.html
+porterui/build/assets/
+porterui/build/*.svg
+porterui/build/manifest.json
+porterw
