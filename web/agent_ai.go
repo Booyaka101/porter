@@ -371,7 +371,6 @@ func parseHealthFromContext(ctx string) healthSummary {
 			continue
 		}
 		if line == "SERVICES:" {
-			inDocker = false
 			break
 		}
 		if inHealth && line != "" {

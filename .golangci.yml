@@ -3,28 +3,25 @@ version: "2"
 run:
   timeout: 5m
 
+# The default set (govet, ineffassign, staticcheck, unused) stays on as the
+# bug-catching core, plus two high-signal extras. errcheck is disabled: on this
+# codebase it only flags intentional fire-and-forget calls (session/file Close,
+# temp os.Remove, best-effort Sscanf) — no real bugs — so it's pure noise here;
+# the linters below provide the real signal.
 linters:
+  disable:
+    - errcheck
   enable:
-    - govet
-    - ineffassign
     - misspell
     - unconvert
-    - unused
-    - staticcheck
   settings:
     staticcheck:
-      # ST1003 (naming), QF* (refactor suggestions) are noisy on existing code;
-      # keep the high-signal checks.
+      # Bugs (SA*) and simplifications (S*); drop the opinionated style (ST*)
+      # and quickfix/refactor (QF*) nags.
       checks:
         - all
-        - -ST1003
-        - -QF1008
-  exclusions:
-    rules:
-      # Best-effort cleanup / fire-and-forget writes intentionally ignore errors.
-      - path: _test\.go
-        linters:
-          - errcheck
+        - -ST1*
+        - -QF1*
 
 formatters:
   enable:

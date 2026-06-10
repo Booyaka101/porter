@@ -50,7 +50,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Connection failed: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	vars := porter.NewVars()
 
