@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"regexp"
@@ -41,7 +42,7 @@ type ScriptDescription struct {
 type ChatMessage struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type ChatRequest struct {
@@ -103,8 +104,8 @@ type OllamaTool struct {
 
 type OllamaToolCall struct {
 	Function struct {
-		Name      string                 `json:"name"`
-		Arguments map[string]interface{} `json:"arguments"`
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
 	} `json:"function"`
 }
 
@@ -339,9 +340,7 @@ func getCachedContext() map[string]string {
 	liveContextCacheLock.RLock()
 	defer liveContextCacheLock.RUnlock()
 	result := make(map[string]string, len(liveContextCache))
-	for k, v := range liveContextCache {
-		result[k] = v
-	}
+	maps.Copy(result, liveContextCache)
 	return result
 }
 
@@ -359,7 +358,7 @@ func parseHealthFromContext(ctx string) healthSummary {
 	inHealth := false
 	inDocker := false
 	var dockerLines []string
-	for _, line := range strings.Split(ctx, "\n") {
+	for line := range strings.SplitSeq(ctx, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "HEALTH:" {
 			inHealth = true
@@ -684,7 +683,7 @@ func buildListServicesResponse(machines []*Machine, liveContext map[string]strin
 
 		inServices := false
 		var docker, system, user []string
-		for _, line := range strings.Split(ctx, "\n") {
+		for line := range strings.SplitSeq(ctx, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "SERVICES:" {
 				inServices = true
@@ -694,8 +693,8 @@ func buildListServicesResponse(machines []*Machine, liveContext map[string]strin
 				continue
 			}
 			name := trimmed
-			if idx := strings.Index(trimmed, " ["); idx != -1 {
-				name = trimmed[:idx]
+			if before, _, ok := strings.Cut(trimmed, " ["); ok {
+				name = before
 			}
 			if strings.Contains(trimmed, "[docker]") {
 				docker = append(docker, name)
@@ -1001,7 +1000,7 @@ func buildMachineDetail(m *Machine, ctx string) string {
 	inServices := false
 	var healthLines, dockerLines, serviceLines []string
 
-	for _, line := range strings.Split(ctx, "\n") {
+	for line := range strings.SplitSeq(ctx, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "HEALTH:" {
 			inHealth = true
@@ -1086,11 +1085,11 @@ func parseServiceAction(message string) (action string, serviceName string) {
 	msg := strings.ToLower(message)
 	actions := []string{"restart", "stop", "start", "status"}
 	for _, a := range actions {
-		idx := strings.Index(msg, a)
-		if idx == -1 {
+		_, after, ok := strings.Cut(msg, a)
+		if !ok {
 			continue
 		}
-		rest := strings.TrimSpace(msg[idx+len(a):])
+		rest := strings.TrimSpace(after)
 		words := strings.Fields(rest)
 		for len(words) > 0 {
 			w := words[0]
@@ -1116,7 +1115,7 @@ func parseServiceAction(message string) (action string, serviceName string) {
 func detectServiceType(ctx string, serviceName string) string {
 	svcLower := strings.ToLower(serviceName)
 	inServices := false
-	for _, line := range strings.Split(ctx, "\n") {
+	for line := range strings.SplitSeq(ctx, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "SERVICES:" {
 			inServices = true
@@ -1576,11 +1575,11 @@ func callOllamaWithTools(ctx context.Context, config *AIAgentConfig, messages []
 		maxTokens = 2048
 	}
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model":    model,
 		"messages": ollamaMessages,
 		"stream":   false,
-		"options": map[string]interface{}{
+		"options": map[string]any{
 			"num_predict": maxTokens,
 			"num_ctx":     8192,
 		},
@@ -1724,7 +1723,7 @@ func fixMachineIDs(ids []string, allMachines []*Machine) []string {
 	return fixed
 }
 
-func normalizeAction(raw map[string]interface{}, allMachines []*Machine) *AgentAction {
+func normalizeAction(raw map[string]any, allMachines []*Machine) *AgentAction {
 	action := &AgentAction{}
 
 	if t, ok := raw["type"].(string); ok {
@@ -1737,7 +1736,7 @@ func normalizeAction(raw map[string]interface{}, allMachines []*Machine) *AgentA
 		action.Command = cmd
 	}
 
-	if ids, ok := raw["machine_ids"].([]interface{}); ok {
+	if ids, ok := raw["machine_ids"].([]any); ok {
 		for _, id := range ids {
 			if s, ok := id.(string); ok {
 				action.MachineIDs = append(action.MachineIDs, s)
@@ -1792,7 +1791,7 @@ func parseActions(response string, allMachines []*Machine) []AgentAction {
 			action.MachineIDs = fixMachineIDs(action.MachineIDs, allMachines)
 			actions = append(actions, action)
 		} else {
-			var raw map[string]interface{}
+			var raw map[string]any
 			if err := json.Unmarshal([]byte(jsonStr), &raw); err == nil {
 				if normalized := normalizeAction(raw, allMachines); normalized != nil {
 					actions = append(actions, *normalized)
@@ -1894,7 +1893,7 @@ THINGS YOU CANNOT DO (do not pretend otherwise):
 				}
 
 				inServices := false
-				for _, line := range strings.Split(ctx, "\n") {
+				for line := range strings.SplitSeq(ctx, "\n") {
 					trimmed := strings.TrimSpace(line)
 					if trimmed == "SERVICES:" {
 						inServices = true
@@ -2004,7 +2003,7 @@ THINGS YOU CANNOT DO (do not pretend otherwise):
 					sb.WriteString("Docker: " + h.Docker + "\n")
 				}
 				inServices := false
-				for _, line := range strings.Split(ctx, "\n") {
+				for line := range strings.SplitSeq(ctx, "\n") {
 					trimmed := strings.TrimSpace(line)
 					if trimmed == "SERVICES:" {
 						inServices = true
@@ -2049,14 +2048,14 @@ func handleAIConfig(w http.ResponseWriter, req *http.Request) {
 
 	config := GetAIAgentConfig()
 	if config == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"configured": false,
 			"message":    "AI Agent not configured. Configure in your wrapper or set PORTER_AI_API_KEY.",
 		})
 		return
 	}
 
-	safeConfig := map[string]interface{}{
+	safeConfig := map[string]any{
 		"configured":   true,
 		"provider":     config.Provider,
 		"model":        config.Model,
@@ -2077,7 +2076,7 @@ func handleAIChat(w http.ResponseWriter, req *http.Request) {
 				Model:    "gpt-4",
 			}
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error": "AI Agent not configured",
 			})
 			return
@@ -2164,7 +2163,7 @@ func handleAIChat(w http.ResponseWriter, req *http.Request) {
 		response, tokens, err = callLLMFallback(req.Context(), config, machines, liveContext, messages, chatReq)
 		if err != nil {
 			log.Printf("AI chat error: %v", err)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error":      err.Error(),
 				"session_id": sessionID,
 			})
@@ -2447,7 +2446,7 @@ func handleAIExecute(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !confirmReq.Confirmed {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Action not confirmed",
 		})
@@ -2473,7 +2472,7 @@ func handleAIExecute(w http.ResponseWriter, req *http.Request) {
 		handleWakeMachine(w, action)
 
 	default:
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"error":   "Unknown action type: " + action.Type,
 		})
@@ -2482,7 +2481,7 @@ func handleAIExecute(w http.ResponseWriter, req *http.Request) {
 
 func handleExecuteScript(w http.ResponseWriter, action AgentAction, useSudo bool) {
 	if action.ScriptPath == "" || len(action.MachineIDs) == 0 {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"error":   "Missing script_path or machine_ids",
 		})
@@ -2507,7 +2506,7 @@ func handleExecuteScript(w http.ResponseWriter, action AgentAction, useSudo bool
 
 	go executeScriptAsync(execID, action.ScriptPath, action.MachineIDs, strings.Join(args, " "), useSudo)
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"success":      true,
 		"execution_id": execID,
 		"execution":    execution,
@@ -2516,7 +2515,7 @@ func handleExecuteScript(w http.ResponseWriter, action AgentAction, useSudo bool
 
 func handleRunCommand(w http.ResponseWriter, action AgentAction, useSudo bool) {
 	if action.Command == "" || len(action.MachineIDs) == 0 {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"error":   "Missing command or machine_ids",
 		})
@@ -2525,7 +2524,7 @@ func handleRunCommand(w http.ResponseWriter, action AgentAction, useSudo bool) {
 
 	validatedCmd, err := ValidateCommand(action.Command)
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"error":   err.Error(),
 		})
@@ -2533,7 +2532,7 @@ func handleRunCommand(w http.ResponseWriter, action AgentAction, useSudo bool) {
 	}
 
 	if IsDangerousCommand(validatedCmd) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":   false,
 			"error":     "This command is potentially dangerous and requires explicit confirmation",
 			"dangerous": true,
@@ -2556,7 +2555,7 @@ func handleRunCommand(w http.ResponseWriter, action AgentAction, useSudo bool) {
 		results = append(results, result)
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"results": results,
 	})
@@ -2564,18 +2563,18 @@ func handleRunCommand(w http.ResponseWriter, action AgentAction, useSudo bool) {
 
 func handleWakeMachine(w http.ResponseWriter, action AgentAction) {
 	if len(action.MachineIDs) == 0 {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"error":   "No machine specified",
 		})
 		return
 	}
 
-	var results []map[string]interface{}
+	var results []map[string]any
 	for _, machineID := range action.MachineIDs {
 		machine, exists := machineRepo.Get(machineID)
 		if !exists {
-			results = append(results, map[string]interface{}{
+			results = append(results, map[string]any{
 				"machine_id": machineID,
 				"success":    false,
 				"error":      "Machine not found",
@@ -2583,7 +2582,7 @@ func handleWakeMachine(w http.ResponseWriter, action AgentAction) {
 			continue
 		}
 		if machine.MAC == "" {
-			results = append(results, map[string]interface{}{
+			results = append(results, map[string]any{
 				"machine_id": machineID,
 				"machine":    machine.Name,
 				"success":    false,
@@ -2593,14 +2592,14 @@ func handleWakeMachine(w http.ResponseWriter, action AgentAction) {
 		}
 		err := WakeOnLAN(machine.MAC, "255.255.255.255")
 		if err != nil {
-			results = append(results, map[string]interface{}{
+			results = append(results, map[string]any{
 				"machine_id": machineID,
 				"machine":    machine.Name,
 				"success":    false,
 				"error":      err.Error(),
 			})
 		} else {
-			results = append(results, map[string]interface{}{
+			results = append(results, map[string]any{
 				"machine_id": machineID,
 				"machine":    machine.Name,
 				"success":    true,
@@ -2608,7 +2607,7 @@ func handleWakeMachine(w http.ResponseWriter, action AgentAction) {
 		}
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"results": results,
 	})

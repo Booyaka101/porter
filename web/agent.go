@@ -194,9 +194,9 @@ func handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 	agentStore.mu.RLock()
 	defer agentStore.mu.RUnlock()
 
-	status := make(map[string]interface{})
+	status := make(map[string]any)
 	for id, agent := range agentStore.agents {
-		status[id] = map[string]interface{}{
+		status[id] = map[string]any{
 			"connected": agent.Connected,
 			"last_seen": agent.LastSeen,
 		}

@@ -352,14 +352,14 @@ func VNCRoutes(r *mux.Router) {
 
 		session, err := StartVNCServer(machine, display)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   err.Error(),
 			})
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"session": session,
 		})
@@ -402,7 +402,7 @@ func VNCRoutes(r *mux.Router) {
 
 		session := GetVNCSession(machineID)
 		if session == nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"active": false,
 			})
 			return

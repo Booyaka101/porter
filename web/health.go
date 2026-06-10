@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -19,8 +20,8 @@ type MachineHealth struct {
 	IP            string    `json:"ip"`
 	Online        bool      `json:"online"`
 	LastChecked   time.Time `json:"last_checked"`
-	LastOnline    time.Time `json:"last_online,omitempty"`
-	LastExecution time.Time `json:"last_execution,omitempty"`
+	LastOnline    time.Time `json:"last_online"`
+	LastExecution time.Time `json:"last_execution"`
 	ResponseTime  int64     `json:"response_time_ms"`
 	Error         string    `json:"error,omitempty"`
 	// Basic stats
@@ -260,14 +261,12 @@ func (h *HealthStore) GetAll() map[string]*MachineHealth {
 	defer h.mu.RUnlock()
 
 	result := make(map[string]*MachineHealth)
-	for k, v := range h.status {
-		result[k] = v
-	}
+	maps.Copy(result, h.status)
 	return result
 }
 
 // GetAggregateStats returns aggregate statistics across all online machines
-func (h *HealthStore) GetAggregateStats() map[string]interface{} {
+func (h *HealthStore) GetAggregateStats() map[string]any {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -313,7 +312,7 @@ func (h *HealthStore) GetAggregateStats() map[string]interface{} {
 		avgDisk = totalDisk / float64(diskCount)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"online":       online,
 		"offline":      offline,
 		"total":        online + offline,
@@ -642,7 +641,7 @@ func HealthRoutes(r *mux.Router) {
 		}
 		unknown = totalMachines - online - offline
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"total":   totalMachines,
 			"online":  online,
 			"offline": offline,
@@ -689,7 +688,7 @@ func HealthRoutes(r *mux.Router) {
 	// Get health poller config
 	r.HandleFunc("/api/health/poller/config", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"enabled":       healthPollerConfig.Enabled,
 			"interval_mins": healthPollerConfig.IntervalMins,
 			"delay_between": healthPollerConfig.DelayBetween,
@@ -717,7 +716,7 @@ func HealthRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Health poller config updated",
 		})
@@ -727,7 +726,7 @@ func HealthRoutes(r *mux.Router) {
 	r.HandleFunc("/api/health/poller/run", func(w http.ResponseWriter, req *http.Request) {
 		go runHealthPoll()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Health poll started",
 		})

@@ -179,7 +179,7 @@ type ScriptExecution struct {
 	ScriptName string            `json:"script_name,omitempty"`
 	MachineIDs []string          `json:"machine_ids,omitempty"`
 	Args       string            `json:"args,omitempty"`
-	StartedAt  time.Time         `json:"started_at,omitempty"`
+	StartedAt  time.Time         `json:"started_at"`
 }
 
 // ============================================================================
@@ -660,7 +660,7 @@ func MachinesRoutes(router *mux.Router) {
 		password := GetDecryptedPassword(machine)
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"processes": []interface{}{}, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"processes": []any{}, "error": err.Error()})
 			return
 		}
 		defer client.Close()
@@ -670,15 +670,15 @@ func MachinesRoutes(router *mux.Router) {
 			"ps aux --sort=-%cpu | head -100 | awk 'NR>1 {print $2\"|\"$1\"|\"$3\"|\"$4\"|\"$11}'",
 			"processes")
 
-		var processes []map[string]interface{}
-		lines := strings.Split(strings.TrimSpace(output), "\n")
-		for _, line := range lines {
+		var processes []map[string]any
+		lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
+		for line := range lines {
 			parts := strings.Split(line, "|")
 			if len(parts) >= 5 {
 				var cpu, mem float64
 				fmt.Sscanf(parts[2], "%f", &cpu)
 				fmt.Sscanf(parts[3], "%f", &mem)
-				processes = append(processes, map[string]interface{}{
+				processes = append(processes, map[string]any{
 					"pid":     parts[0],
 					"user":    parts[1],
 					"cpu":     cpu,
@@ -689,7 +689,7 @@ func MachinesRoutes(router *mux.Router) {
 			}
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{"processes": processes})
+		json.NewEncoder(w).Encode(map[string]any{"processes": processes})
 	}).Methods("GET")
 
 	// POST /api/machines/{id}/processes/{pid}/kill - Kill a process (must be before {id} route)
@@ -715,7 +715,7 @@ func MachinesRoutes(router *mux.Router) {
 		password := GetDecryptedPassword(machine)
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			return
 		}
 		defer client.Close()
@@ -724,7 +724,7 @@ func MachinesRoutes(router *mux.Router) {
 		cmd := fmt.Sprintf("kill -%s %s 2>&1 || sudo kill -%s %s 2>&1", request.Signal, pid, request.Signal, pid)
 		output, _ := RunPorterTask(client, password, "Kill process", cmd, "kill")
 
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "output": output})
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "output": output})
 	}).Methods("POST")
 
 	// GET /api/machines/{id} - Get a single machine by ID
@@ -908,7 +908,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		execution, exists := execTracker.Get(execID)
 		if !exists {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Execution not found",
 			})
@@ -932,7 +932,7 @@ func MachinesRoutes(router *mux.Router) {
 		// For now, just mark as cancelled
 		execTracker.Cancel(execID)
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Cancellation signal sent, cache cleared for fresh rebuild",
 		})
@@ -949,7 +949,7 @@ func MachinesRoutes(router *mux.Router) {
 			SkipValidate bool   `json:"skip_validate"` // Skip validation for internal calls
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid request body",
 			})
@@ -959,7 +959,7 @@ func MachinesRoutes(router *mux.Router) {
 		// Validate command
 		validatedCmd, err := ValidateCommand(req.Command)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   err.Error(),
 			})
@@ -969,7 +969,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		// Check for dangerous commands (only for user input, not internal system commands)
 		if !req.SkipValidate && !req.Confirmed && IsDangerousCommand(req.Command) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success":           false,
 				"error":             "This command appears to be potentially dangerous",
 				"dangerous":         true,
@@ -981,7 +981,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		// Rate limiting
 		if !commandRateLimiter.Allow(req.MachineID) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success":      false,
 				"error":        "Rate limit exceeded. Please wait before sending more commands.",
 				"rate_limited": true,
@@ -991,7 +991,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		machine, exists := machineRepo.Get(req.MachineID)
 		if !exists {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Machine not found",
 			})
@@ -1013,7 +1013,7 @@ func MachinesRoutes(router *mux.Router) {
 		RecordExecution(result, "ad-hoc-command", req.Command, "")
 
 		if !result.Success {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success":   false,
 				"error":     result.Error,
 				"output":    result.Output,
@@ -1034,7 +1034,7 @@ func MachinesRoutes(router *mux.Router) {
 			}
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":   result.Success,
 			"output":    cleanOutput,
 			"exit_code": exitCode,
@@ -1047,7 +1047,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		// Parse multipart form - allow up to 5GB files
 		if err := r.ParseMultipartForm(5 << 30); err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to parse form: " + err.Error(),
 			})
@@ -1063,7 +1063,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		// Validate inputs
 		if machineID == "" || destPath == "" {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "machine_id and path are required",
 			})
@@ -1073,7 +1073,7 @@ func MachinesRoutes(router *mux.Router) {
 		// Get uploaded file
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "No file uploaded: " + err.Error(),
 			})
@@ -1084,7 +1084,7 @@ func MachinesRoutes(router *mux.Router) {
 		// Sanitize path
 		cleanPath := SanitizeFilePath(destPath)
 		if cleanPath == "" {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid file path",
 			})
@@ -1093,7 +1093,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		// Rate limiting
 		if !commandRateLimiter.Allow(machineID) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success":      false,
 				"error":        "Rate limit exceeded. Please wait before uploading more files.",
 				"rate_limited": true,
@@ -1103,7 +1103,7 @@ func MachinesRoutes(router *mux.Router) {
 
 		machine, exists := machineRepo.Get(machineID)
 		if !exists {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Machine not found",
 			})
@@ -1113,7 +1113,7 @@ func MachinesRoutes(router *mux.Router) {
 		// Save file to temp location
 		tempFile, err := os.CreateTemp("", "upload-*-"+header.Filename)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to create temp file: " + err.Error(),
 			})
@@ -1126,7 +1126,7 @@ func MachinesRoutes(router *mux.Router) {
 		_, err = io.Copy(tempFile, file)
 		tempFile.Close()
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to save uploaded file: " + err.Error(),
 			})
@@ -1196,8 +1196,8 @@ func runCommandOnMachine(m *Machine, command string, useSudo bool) ExecutionResu
 }
 
 // uploadFileWithPorter uploads a file using rsync (Linux) or SCP (Windows)
-func uploadFileWithPorter(m *Machine, localPath, destPath, permissions, owner string, makeExecutable, createDirs bool) map[string]interface{} {
-	result := map[string]interface{}{
+func uploadFileWithPorter(m *Machine, localPath, destPath, permissions, owner string, makeExecutable, createDirs bool) map[string]any {
+	result := map[string]any{
 		"success": false,
 		"path":    destPath,
 	}
@@ -1474,8 +1474,8 @@ func runScriptOnMachine(m *Machine, scriptPath, args string) ExecutionResult {
 	var libErr error = fmt.Errorf("no lib")
 
 	// Check if this is a custom script
-	if strings.HasPrefix(scriptPath, "custom:") {
-		customID := strings.TrimPrefix(scriptPath, "custom:")
+	if after, ok := strings.CutPrefix(scriptPath, "custom:"); ok {
+		customID := after
 
 		// Get custom script from store
 		if customScriptStore == nil {

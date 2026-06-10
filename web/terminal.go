@@ -348,11 +348,11 @@ func TerminalRoutes(r *mux.Router) {
 
 		recordingsDir := filepath.Join(getDataDir(), "terminal-recordings")
 		if _, err := os.Stat(recordingsDir); os.IsNotExist(err) {
-			json.NewEncoder(w).Encode(map[string]interface{}{"recordings": []interface{}{}})
+			json.NewEncoder(w).Encode(map[string]any{"recordings": []any{}})
 			return
 		}
 
-		var recordings []map[string]interface{}
+		var recordings []map[string]any
 		files, _ := os.ReadDir(recordingsDir)
 		for _, file := range files {
 			if !file.IsDir() && strings.HasSuffix(file.Name(), ".json") {
@@ -364,7 +364,7 @@ func TerminalRoutes(r *mux.Router) {
 				if err := json.Unmarshal(data, &rec); err != nil {
 					continue
 				}
-				recordings = append(recordings, map[string]interface{}{
+				recordings = append(recordings, map[string]any{
 					"id":          rec.ID,
 					"machineId":   rec.MachineID,
 					"machineName": rec.MachineName,
@@ -374,7 +374,7 @@ func TerminalRoutes(r *mux.Router) {
 				})
 			}
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"recordings": recordings})
+		json.NewEncoder(w).Encode(map[string]any{"recordings": recordings})
 	}).Methods("GET")
 
 	// Get single recording
@@ -405,7 +405,7 @@ func TerminalRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+		json.NewEncoder(w).Encode(map[string]any{"success": true})
 	}).Methods("DELETE")
 
 	// Start/stop recording for a session
@@ -435,7 +435,7 @@ func TerminalRoutes(r *mux.Router) {
 			session.recordStart = time.Now()
 			session.recordEvents = []TerminalRecordingEvent{}
 			session.mu.Unlock()
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "recording": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "recording": true})
 		} else if request.Action == "stop" {
 			session.mu.Lock()
 			if session.recording {
@@ -460,13 +460,13 @@ func TerminalRoutes(r *mux.Router) {
 
 				session.recordEvents = nil
 				session.mu.Unlock()
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "recording": false, "recordingId": recording.ID})
+				json.NewEncoder(w).Encode(map[string]any{"success": true, "recording": false, "recordingId": recording.ID})
 			} else {
 				session.mu.Unlock()
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Not recording"})
+				json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Not recording"})
 			}
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid action"})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Invalid action"})
 		}
 	}).Methods("POST")
 }

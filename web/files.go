@@ -42,13 +42,13 @@ func FilesRoutes(r *mux.Router) {
 		output, _ := RunPorterTask(client, password, "List directory", cmd, "files")
 		if strings.Contains(output, "ERROR") {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"files": []interface{}{}, "error": "Failed to list directory"})
+			json.NewEncoder(w).Encode(map[string]any{"files": []any{}, "error": "Failed to list directory"})
 			return
 		}
 
-		var files []map[string]interface{}
-		lines := strings.Split(output, "\n")
-		for _, line := range lines {
+		var files []map[string]any
+		lines := strings.SplitSeq(output, "\n")
+		for line := range lines {
 			if line == "" || strings.HasPrefix(line, "total") {
 				continue
 			}
@@ -76,7 +76,7 @@ func FilesRoutes(r *mux.Router) {
 			size := int64(0)
 			fmt.Sscanf(fields[4], "%d", &size)
 
-			files = append(files, map[string]interface{}{
+			files = append(files, map[string]any{
 				"name":        name,
 				"path":        filePath,
 				"isDir":       isDir,
@@ -90,7 +90,7 @@ func FilesRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"files": files})
+		json.NewEncoder(w).Encode(map[string]any{"files": files})
 	}).Methods("GET")
 
 	// Read file content
@@ -116,9 +116,9 @@ func FilesRoutes(r *mux.Router) {
 		output, err := client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"content": "", "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"content": "", "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"content": string(output)})
+			json.NewEncoder(w).Encode(map[string]any{"content": string(output)})
 		}
 	}).Methods("GET")
 
@@ -187,7 +187,7 @@ func FilesRoutes(r *mux.Router) {
 		_, err = client.Run(writeCmd)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			return
 		}
 
@@ -222,7 +222,7 @@ func FilesRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		response := map[string]interface{}{"success": true}
+		response := map[string]any{"success": true}
 		if isSystemdFile {
 			response["systemd"] = true
 			response["userService"] = isUserService
@@ -275,9 +275,9 @@ func FilesRoutes(r *mux.Router) {
 			if err != nil {
 				errMsg = err.Error()
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": errMsg})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": errMsg})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -322,9 +322,9 @@ func FilesRoutes(r *mux.Router) {
 			if err != nil {
 				errMsg = err.Error()
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": errMsg})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": errMsg})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("DELETE")
 
@@ -367,9 +367,9 @@ func FilesRoutes(r *mux.Router) {
 			if err != nil {
 				errMsg = err.Error()
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": errMsg})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": errMsg})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -451,9 +451,9 @@ func FilesRoutes(r *mux.Router) {
 		_, err = io.Copy(remoteFile, localFile)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "path": remotePath})
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "path": remotePath})
 		}
 	}).Methods("POST")
 

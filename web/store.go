@@ -29,7 +29,7 @@ func DefaultStore() *Store {
 }
 
 // Save persists data to a JSON file with backup
-func (s *Store) Save(filename string, data interface{}) error {
+func (s *Store) Save(filename string, data any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,7 +58,7 @@ func (s *Store) Save(filename string, data interface{}) error {
 }
 
 // Load reads data from a JSON file
-func (s *Store) Load(filename string, data interface{}) error {
+func (s *Store) Load(filename string, data any) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

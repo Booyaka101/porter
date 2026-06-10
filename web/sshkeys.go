@@ -62,7 +62,7 @@ func SSHKeyRoutes(r *mux.Router) {
 		sshKeys[key.ID] = &key
 		sshKeysMu.Unlock()
 
-		AddAuditLog("add_ssh_key", "security", "", "", map[string]interface{}{"name": key.Name}, true, "")
+		AddAuditLog("add_ssh_key", "security", "", "", map[string]any{"name": key.Name}, true, "")
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(key)
@@ -76,7 +76,7 @@ func SSHKeyRoutes(r *mux.Router) {
 		delete(sshKeys, id)
 		sshKeysMu.Unlock()
 
-		AddAuditLog("delete_ssh_key", "security", "", "", map[string]interface{}{"id": id}, true, "")
+		AddAuditLog("delete_ssh_key", "security", "", "", map[string]any{"id": id}, true, "")
 
 		w.WriteHeader(http.StatusOK)
 	}).Methods("DELETE")
@@ -116,7 +116,7 @@ func SSHKeyRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -176,7 +176,7 @@ func SSHKeyRoutes(r *mux.Router) {
 			errMsg = fmt.Sprintf("%d task(s) failed", stats.Failed)
 		}
 
-		AddAuditLog("deploy_ssh_key", "security", machineID, machine.Name, map[string]interface{}{
+		AddAuditLog("deploy_ssh_key", "security", machineID, machine.Name, map[string]any{
 			"key_name": key.Name,
 			"user":     reqBody.User,
 			"stats":    fmt.Sprintf("ok=%d changed=%d failed=%d", stats.OK, stats.Changed, stats.Failed),
@@ -184,12 +184,12 @@ func SSHKeyRoutes(r *mux.Router) {
 
 		w.Header().Set("Content-Type", "application/json")
 		if !success {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   errMsg,
 			})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
 				"message": fmt.Sprintf("SSH key deployed to %s@%s", reqBody.User, machine.Name),
 				"stats":   fmt.Sprintf("ok=%d changed=%d", stats.OK, stats.Changed),
@@ -215,7 +215,7 @@ func SSHKeyRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -243,8 +243,8 @@ func SSHKeyRoutes(r *mux.Router) {
 		output := vars.Get("auth_keys")
 
 		var keys []map[string]string
-		lines := strings.Split(output, "\n")
-		for _, line := range lines {
+		lines := strings.SplitSeq(output, "\n")
+		for line := range lines {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
@@ -265,7 +265,7 @@ func SSHKeyRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"keys":    keys,
 		})
@@ -297,7 +297,7 @@ func SSHKeyRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -325,7 +325,7 @@ func SSHKeyRoutes(r *mux.Router) {
 
 		success := execErr == nil && stats.Failed == 0
 
-		AddAuditLog("remove_ssh_key", "security", machineID, machine.Name, map[string]interface{}{
+		AddAuditLog("remove_ssh_key", "security", machineID, machine.Name, map[string]any{
 			"user": reqBody.User,
 		}, success, "")
 
@@ -335,12 +335,12 @@ func SSHKeyRoutes(r *mux.Router) {
 			if execErr != nil {
 				errMsg = execErr.Error()
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   errMsg,
 			})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
 			})
 		}

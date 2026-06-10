@@ -34,12 +34,12 @@ func SystemToolsRoutes(r *mux.Router) {
 			"dpkg-query -W -f='${Package}|${Version}|${Status}\n' 2>/dev/null | grep 'install ok installed' | head -500",
 			"packages")
 
-		var packages []map[string]interface{}
-		lines := strings.Split(strings.TrimSpace(output), "\n")
-		for _, line := range lines {
+		var packages []map[string]any
+		lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
+		for line := range lines {
 			parts := strings.Split(line, "|")
 			if len(parts) >= 2 {
-				packages = append(packages, map[string]interface{}{
+				packages = append(packages, map[string]any{
 					"name":    parts[0],
 					"version": parts[1],
 					"status":  "installed",
@@ -48,7 +48,7 @@ func SystemToolsRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"packages": packages})
+		json.NewEncoder(w).Encode(map[string]any{"packages": packages})
 	}).Methods("GET")
 
 	// Install packages - uses Porter's task manifest
@@ -88,9 +88,9 @@ func SystemToolsRoutes(r *mux.Router) {
 			} else {
 				errMsg = fmt.Sprintf("%d task(s) failed", stats.Failed)
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": errMsg})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": errMsg})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -131,9 +131,9 @@ func SystemToolsRoutes(r *mux.Router) {
 			} else {
 				errMsg = fmt.Sprintf("%d task(s) failed", stats.Failed)
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": errMsg})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": errMsg})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -165,9 +165,9 @@ func SystemToolsRoutes(r *mux.Router) {
 			} else {
 				errMsg = fmt.Sprintf("%d task(s) failed", stats.Failed)
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": errMsg})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": errMsg})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
 				"stats":   fmt.Sprintf("ok=%d changed=%d", stats.OK, stats.Changed),
 			})
@@ -195,11 +195,11 @@ func SystemToolsRoutes(r *mux.Router) {
 		enabled := strings.Contains(string(statusOutput), "Status: active")
 
 		// Get rules
-		var rules []map[string]interface{}
+		var rules []map[string]any
 		if enabled {
 			rulesOutput, _ := client.Run("sudo ufw status numbered 2>/dev/null")
-			lines := strings.Split(string(rulesOutput), "\n")
-			for _, line := range lines {
+			lines := strings.SplitSeq(string(rulesOutput), "\n")
+			for line := range lines {
 				line = strings.TrimSpace(line)
 				if strings.HasPrefix(line, "[") {
 					// Parse rule like "[ 1] 22/tcp                     ALLOW IN    Anywhere"
@@ -214,7 +214,7 @@ func SystemToolsRoutes(r *mux.Router) {
 							port = pp[0]
 							protocol = pp[1]
 						}
-						rules = append(rules, map[string]interface{}{
+						rules = append(rules, map[string]any{
 							"port":     port,
 							"protocol": protocol,
 							"action":   action,
@@ -225,7 +225,7 @@ func SystemToolsRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"enabled": enabled,
 			"rules":   rules,
 		})
@@ -264,9 +264,9 @@ func SystemToolsRoutes(r *mux.Router) {
 		_, err = client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -313,9 +313,9 @@ func SystemToolsRoutes(r *mux.Router) {
 		_, err = client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST", "DELETE")
 
@@ -339,13 +339,13 @@ func SystemToolsRoutes(r *mux.Router) {
 		output, err := client.Run("awk -F: '($3 >= 1000 || $3 == 0) {print $1\"|\"$3\"|\"$6\"|\"$7}' /etc/passwd")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"users": []interface{}{}})
+			json.NewEncoder(w).Encode(map[string]any{"users": []any{}})
 			return
 		}
 
-		var users []map[string]interface{}
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
+		var users []map[string]any
+		lines := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
+		for line := range lines {
 			parts := strings.Split(line, "|")
 			if len(parts) >= 4 {
 				username := parts[0]
@@ -356,7 +356,7 @@ func SystemToolsRoutes(r *mux.Router) {
 				uid := 0
 				fmt.Sscanf(parts[1], "%d", &uid)
 
-				users = append(users, map[string]interface{}{
+				users = append(users, map[string]any{
 					"username": username,
 					"uid":      uid,
 					"home":     parts[2],
@@ -367,7 +367,7 @@ func SystemToolsRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"users": users})
+		json.NewEncoder(w).Encode(map[string]any{"users": users})
 	}).Methods("GET")
 
 	// Add user
@@ -407,7 +407,7 @@ func SystemToolsRoutes(r *mux.Router) {
 		_, err = client.Run(cmd)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			return
 		}
 
@@ -422,7 +422,7 @@ func SystemToolsRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+		json.NewEncoder(w).Encode(map[string]any{"success": true})
 	}).Methods("POST")
 
 	// Delete user
@@ -447,9 +447,9 @@ func SystemToolsRoutes(r *mux.Router) {
 		_, err = client.Run(fmt.Sprintf("sudo userdel -r %s 2>/dev/null || sudo userdel %s", username, username))
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("DELETE")
 
@@ -469,7 +469,7 @@ func SystemToolsRoutes(r *mux.Router) {
 		}
 		defer client.Close()
 
-		info := map[string]interface{}{}
+		info := map[string]any{}
 
 		if output, err := client.Run("hostname"); err == nil {
 			info["hostname"] = strings.TrimSpace(string(output))
@@ -518,9 +518,9 @@ func SystemToolsRoutes(r *mux.Router) {
 		_, err = client.Run(fmt.Sprintf("sudo hostnamectl set-hostname %s", request.Hostname))
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -545,7 +545,7 @@ func SystemToolsRoutes(r *mux.Router) {
 		}()
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "Reboot initiated"})
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "message": "Reboot initiated"})
 	}).Methods("POST")
 
 	// Shutdown
@@ -569,6 +569,6 @@ func SystemToolsRoutes(r *mux.Router) {
 		}()
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "Shutdown initiated"})
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "message": "Shutdown initiated"})
 	}).Methods("POST")
 }

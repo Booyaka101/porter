@@ -418,7 +418,7 @@ func migrateMySQLAuditLog(mysql *sql.DB, sqlite *Database) error {
 }
 
 // Helper functions
-func nullIfEmpty(s string) interface{} {
+func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil
 	}
@@ -433,7 +433,7 @@ func boolToInt(b bool) int {
 }
 
 // ExportMySQLToJSON exports MySQL data to JSON for backup
-func ExportMySQLToJSON(mysqlConfig DBConfig) (map[string]interface{}, error) {
+func ExportMySQLToJSON(mysqlConfig DBConfig) (map[string]any, error) {
 	mysqlDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4",
 		mysqlConfig.User, mysqlConfig.Password, mysqlConfig.Host, mysqlConfig.Port, mysqlConfig.Database)
 
@@ -443,12 +443,12 @@ func ExportMySQLToJSON(mysqlConfig DBConfig) (map[string]interface{}, error) {
 	}
 	defer mysqlDB.Close()
 
-	export := make(map[string]interface{})
+	export := make(map[string]any)
 
 	// Export machines
 	rows, err := mysqlDB.Query("SELECT id, name, ip, username, password, status, category, notes, agent_port, has_agent, tags, mac FROM machines")
 	if err == nil {
-		var machines []map[string]interface{}
+		var machines []map[string]any
 		for rows.Next() {
 			var id, name, ip, username string
 			var password, status, category, notes, tags, mac sql.NullString
@@ -456,7 +456,7 @@ func ExportMySQLToJSON(mysqlConfig DBConfig) (map[string]interface{}, error) {
 			var hasAgent bool
 
 			rows.Scan(&id, &name, &ip, &username, &password, &status, &category, &notes, &agentPort, &hasAgent, &tags, &mac)
-			m := map[string]interface{}{
+			m := map[string]any{
 				"id": id, "name": name, "ip": ip, "username": username,
 				"password": password.String, "status": status.String, "category": category.String,
 				"notes": notes.String, "agent_port": agentPort, "has_agent": hasAgent,

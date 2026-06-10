@@ -52,7 +52,7 @@ type TaskDefinition struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
 	Params      map[string]string `json:"params"`
-	Options     TaskOptions       `json:"options,omitempty"`
+	Options     TaskOptions       `json:"options"`
 }
 
 // TaskOptions represents optional task configuration
@@ -322,7 +322,7 @@ func ManifestRoutes(r *mux.Router) {
 	r.HandleFunc("/api/task-types", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		taskTypes := []map[string]interface{}{
+		taskTypes := []map[string]any{
 			{"type": "upload", "name": "Upload File", "category": "file", "params": []string{"src", "dest"}},
 			{"type": "copy", "name": "Copy File", "category": "file", "params": []string{"src", "dest"}},
 			{"type": "move", "name": "Move File", "category": "file", "params": []string{"src", "dest"}},

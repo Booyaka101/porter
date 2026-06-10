@@ -413,7 +413,7 @@ func (e *Executor) runSudoCapture(cmd string) (string, error) {
 }
 
 func (e *Executor) parseOpt(opts, key string) string {
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		parts := strings.SplitN(opt, ":", 2)
 		if len(parts) == 2 && parts[0] == key {
 			return parts[1]
@@ -559,8 +559,9 @@ func (e *Executor) journalCtl(unit, flags string, user, sudo bool, register stri
 // =============================================================================
 
 func (e *Executor) buildUserCmd(base, user, opts string) string {
-	cmd := base
-	for _, opt := range strings.Split(opts, ";") {
+	var cmd strings.Builder
+	cmd.WriteString(base)
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -571,17 +572,17 @@ func (e *Executor) buildUserCmd(base, user, opts string) string {
 		switch parts[0] {
 		case "groups":
 			if base == "usermod" {
-				cmd += " -aG " + parts[1]
+				cmd.WriteString(" -aG " + parts[1])
 			} else {
-				cmd += " -G " + parts[1]
+				cmd.WriteString(" -G " + parts[1])
 			}
 		case "shell":
-			cmd += " -s " + parts[1]
+			cmd.WriteString(" -s " + parts[1])
 		case "home":
-			cmd += " -m -d " + parts[1]
+			cmd.WriteString(" -m -d " + parts[1])
 		}
 	}
-	return cmd + " " + user
+	return cmd.String() + " " + user
 }
 
 // =============================================================================
@@ -610,11 +611,12 @@ func (e *Executor) dockerCtl(container, state, image, opts string) error {
 }
 
 func (e *Executor) buildDockerRun(container, image, opts string) string {
-	cmd := "docker run -d"
+	var cmd strings.Builder
+	cmd.WriteString("docker run -d")
 	if container != "" {
-		cmd += " --name " + container
+		cmd.WriteString(" --name " + container)
 	}
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -624,28 +626,28 @@ func (e *Executor) buildDockerRun(container, image, opts string) string {
 		}
 		switch parts[0] {
 		case "ports":
-			for _, p := range strings.Split(parts[1], ",") {
+			for p := range strings.SplitSeq(parts[1], ",") {
 				if p != "" {
-					cmd += " -p " + p
+					cmd.WriteString(" -p " + p)
 				}
 			}
 		case "volumes":
-			for _, v := range strings.Split(parts[1], ",") {
+			for v := range strings.SplitSeq(parts[1], ",") {
 				if v != "" {
-					cmd += " -v " + v
+					cmd.WriteString(" -v " + v)
 				}
 			}
 		case "env":
-			for _, ev := range strings.Split(parts[1], ",") {
+			for ev := range strings.SplitSeq(parts[1], ",") {
 				if ev != "" {
-					cmd += " -e " + ev
+					cmd.WriteString(" -e " + ev)
 				}
 			}
 		case "network":
-			cmd += " --network " + parts[1]
+			cmd.WriteString(" --network " + parts[1])
 		}
 	}
-	return cmd + " " + image
+	return cmd.String() + " " + image
 }
 
 // =============================================================================
@@ -861,7 +863,7 @@ func (e *Executor) goCtl(path, state, output, opts string) error {
 	parallel := ""
 	failfast := false
 
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -958,7 +960,7 @@ func (e *Executor) npmCtl(path, state, opts string) error {
 	legacyPeerDeps := false
 	script := ""
 
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -1077,7 +1079,7 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 	sshKey := ""   // SSH key path for local mode
 
 	// Parse options from body (semicolon-separated key:value pairs)
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -1151,14 +1153,14 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 		cmd += " --bwlimit=" + bwLimit
 	}
 	if exclude != "" {
-		for _, ex := range strings.Split(exclude, ",") {
+		for ex := range strings.SplitSeq(exclude, ",") {
 			if ex != "" {
 				cmd += " --exclude='" + ex + "'"
 			}
 		}
 	}
 	if include != "" {
-		for _, inc := range strings.Split(include, ",") {
+		for inc := range strings.SplitSeq(include, ",") {
 			if inc != "" {
 				cmd += " --include='" + inc + "'"
 			}

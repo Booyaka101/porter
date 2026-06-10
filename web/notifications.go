@@ -342,8 +342,8 @@ func (n *NotificationStore) sendSlack(notif Notification) {
 		color = "#ffaa00"
 	}
 
-	payload := map[string]interface{}{
-		"attachments": []map[string]interface{}{
+	payload := map[string]any{
+		"attachments": []map[string]any{
 			{
 				"color":  color,
 				"title":  notif.Title,
@@ -491,7 +491,7 @@ func NotificationRoutes(r *mux.Router) {
 	r.HandleFunc("/api/notifications/unread", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		unread := notificationStore.GetUnread()
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"count":         len(unread),
 			"notifications": unread,
 		})

@@ -11,14 +11,14 @@ import (
 
 // ExportData represents all exportable configuration
 type ExportData struct {
-	Version    string                 `json:"version"`
-	ExportedAt time.Time              `json:"exported_at"`
-	Machines   []*Machine             `json:"machines,omitempty"`
-	Groups     []*MachineGroup        `json:"groups,omitempty"`
-	Bookmarks  []*CommandBookmark     `json:"bookmarks,omitempty"`
-	SSHKeys    []*SSHKey              `json:"ssh_keys,omitempty"`
-	BackupJobs []*BackupJob           `json:"backup_jobs,omitempty"`
-	Manifests  map[string]interface{} `json:"manifests,omitempty"`
+	Version    string             `json:"version"`
+	ExportedAt time.Time          `json:"exported_at"`
+	Machines   []*Machine         `json:"machines,omitempty"`
+	Groups     []*MachineGroup    `json:"groups,omitempty"`
+	Bookmarks  []*CommandBookmark `json:"bookmarks,omitempty"`
+	SSHKeys    []*SSHKey          `json:"ssh_keys,omitempty"`
+	BackupJobs []*BackupJob       `json:"backup_jobs,omitempty"`
+	Manifests  map[string]any     `json:"manifests,omitempty"`
 }
 
 // ImportExportRoutes sets up import/export API routes
@@ -88,7 +88,7 @@ func ImportExportRoutes(r *mux.Router) {
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=porter-export-%s.json", time.Now().Format("20060102-150405")))
 		json.NewEncoder(w).Encode(export)
 
-		AddAuditLog("export", "system", "", "", map[string]interface{}{"what": what}, true, "")
+		AddAuditLog("export", "system", "", "", map[string]any{"what": what}, true, "")
 	}).Methods("GET")
 
 	// Import configuration
@@ -161,7 +161,7 @@ func ImportExportRoutes(r *mux.Router) {
 			backupJobsMu.Unlock()
 		}
 
-		AddAuditLog("import", "system", "", "", map[string]interface{}{
+		AddAuditLog("import", "system", "", "", map[string]any{
 			"machines":    imported.Machines,
 			"groups":      imported.Groups,
 			"bookmarks":   imported.Bookmarks,
@@ -170,7 +170,7 @@ func ImportExportRoutes(r *mux.Router) {
 		}, true, "")
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":  true,
 			"imported": imported,
 		})

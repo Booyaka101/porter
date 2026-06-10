@@ -358,7 +358,7 @@ func migrateNotificationConfig(dataDir string) error {
 	return nil
 }
 
-func nullTime(t time.Time) interface{} {
+func nullTime(t time.Time) any {
 	if t.IsZero() {
 		return nil
 	}

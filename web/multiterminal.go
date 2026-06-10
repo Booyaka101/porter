@@ -159,7 +159,7 @@ func MultiTerminalRoutes(r *mux.Router) {
 				exec.Status = "partial"
 			}
 
-			AddAuditLog("multi_terminal_execute", "terminal", "", "", map[string]interface{}{
+			AddAuditLog("multi_terminal_execute", "terminal", "", "", map[string]any{
 				"command":       reqBody.Command,
 				"machine_count": len(reqBody.MachineIDs),
 			}, allSuccess, "")

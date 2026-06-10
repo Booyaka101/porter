@@ -108,7 +108,7 @@ func TestTracerEmitsRootAndChildSpans(t *testing.T) {
 	root.End(nil)
 
 	var spans []Span
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		var s Span
 		if err := json.Unmarshal([]byte(line), &s); err != nil {
 			t.Fatalf("decode span: %v (line %q)", err, line)

@@ -12,9 +12,9 @@ import (
 
 // DashboardUpdate represents a real-time update for the dashboard
 type DashboardUpdate struct {
-	Type      string      `json:"type"`
-	Timestamp time.Time   `json:"timestamp"`
-	Data      interface{} `json:"data"`
+	Type      string    `json:"type"`
+	Timestamp time.Time `json:"timestamp"`
+	Data      any       `json:"data"`
 }
 
 // DashboardClient represents a connected WebSocket client
@@ -65,7 +65,7 @@ func (h *DashboardHub) run() {
 			h.mu.Lock()
 			h.clients[client] = true
 			h.mu.Unlock()
-			LogDebug("Dashboard client connected", map[string]interface{}{
+			LogDebug("Dashboard client connected", map[string]any{
 				"total_clients": len(h.clients),
 			})
 
@@ -76,7 +76,7 @@ func (h *DashboardHub) run() {
 				close(client.send)
 			}
 			h.mu.Unlock()
-			LogDebug("Dashboard client disconnected", map[string]interface{}{
+			LogDebug("Dashboard client disconnected", map[string]any{
 				"total_clients": len(h.clients),
 			})
 
@@ -134,7 +134,7 @@ func (h *DashboardHub) startHealthBroadcast() {
 }
 
 // Broadcast sends an update to all connected clients
-func (h *DashboardHub) Broadcast(updateType string, data interface{}) {
+func (h *DashboardHub) Broadcast(updateType string, data any) {
 	update := DashboardUpdate{
 		Type:      updateType,
 		Timestamp: time.Now(),
@@ -143,7 +143,7 @@ func (h *DashboardHub) Broadcast(updateType string, data interface{}) {
 
 	jsonData, err := json.Marshal(update)
 	if err != nil {
-		LogError("Failed to marshal dashboard update", map[string]interface{}{
+		LogError("Failed to marshal dashboard update", map[string]any{
 			"type":  updateType,
 			"error": err.Error(),
 		})
@@ -155,7 +155,7 @@ func (h *DashboardHub) Broadcast(updateType string, data interface{}) {
 
 // BroadcastMachineStatus broadcasts a machine status change
 func BroadcastMachineStatus(machineID string, status string) {
-	GetDashboardHub().Broadcast("machine_status", map[string]interface{}{
+	GetDashboardHub().Broadcast("machine_status", map[string]any{
 		"machine_id": machineID,
 		"status":     status,
 	})
@@ -163,7 +163,7 @@ func BroadcastMachineStatus(machineID string, status string) {
 
 // BroadcastExecutionUpdate broadcasts an execution status update
 func BroadcastExecutionUpdate(executionID string, status string, progress int) {
-	GetDashboardHub().Broadcast("execution_update", map[string]interface{}{
+	GetDashboardHub().Broadcast("execution_update", map[string]any{
 		"execution_id": executionID,
 		"status":       status,
 		"progress":     progress,
@@ -172,7 +172,7 @@ func BroadcastExecutionUpdate(executionID string, status string, progress int) {
 
 // BroadcastNotification broadcasts a notification to all clients
 func BroadcastNotification(level string, title string, message string) {
-	GetDashboardHub().Broadcast("notification", map[string]interface{}{
+	GetDashboardHub().Broadcast("notification", map[string]any{
 		"level":   level,
 		"title":   title,
 		"message": message,
@@ -238,7 +238,7 @@ func DashboardWSRoutes(r *mux.Router) {
 	r.HandleFunc("/api/dashboard/ws", func(w http.ResponseWriter, req *http.Request) {
 		conn, err := dashboardUpgrader.Upgrade(w, req, nil)
 		if err != nil {
-			LogError("Dashboard WebSocket upgrade failed", map[string]interface{}{
+			LogError("Dashboard WebSocket upgrade failed", map[string]any{
 				"error": err.Error(),
 			})
 			return
@@ -263,7 +263,7 @@ func DashboardWSRoutes(r *mux.Router) {
 		initialUpdate := DashboardUpdate{
 			Type:      "initial_state",
 			Timestamp: time.Now(),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"machines":      machines,
 				"health":        healthData,
 				"machine_count": len(machines),

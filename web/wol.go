@@ -30,10 +30,10 @@ func WakeOnLAN(macAddress string, broadcastIP string) error {
 
 	// Build magic packet: 6 bytes of 0xFF followed by MAC address repeated 16 times
 	packet := make([]byte, 102)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		packet[i] = 0xFF
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		copy(packet[6+i*6:], macBytes)
 	}
 
@@ -90,15 +90,15 @@ var (
 
 // AuditLogEntry represents an action taken in the system
 type AuditLogEntry struct {
-	ID          string                 `json:"id"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Action      string                 `json:"action"`
-	Category    string                 `json:"category"`
-	MachineID   string                 `json:"machine_id,omitempty"`
-	MachineName string                 `json:"machine_name,omitempty"`
-	Details     map[string]interface{} `json:"details,omitempty"`
-	Success     bool                   `json:"success"`
-	Error       string                 `json:"error,omitempty"`
+	ID          string         `json:"id"`
+	Timestamp   time.Time      `json:"timestamp"`
+	Action      string         `json:"action"`
+	Category    string         `json:"category"`
+	MachineID   string         `json:"machine_id,omitempty"`
+	MachineName string         `json:"machine_name,omitempty"`
+	Details     map[string]any `json:"details,omitempty"`
+	Success     bool           `json:"success"`
+	Error       string         `json:"error,omitempty"`
 }
 
 var (
@@ -107,7 +107,7 @@ var (
 )
 
 // AddAuditLog adds an entry to the audit log
-func AddAuditLog(action, category, machineID, machineName string, details map[string]interface{}, success bool, errMsg string) {
+func AddAuditLog(action, category, machineID, machineName string, details map[string]any, success bool, errMsg string) {
 	auditLogMu.Lock()
 	defer auditLogMu.Unlock()
 
@@ -143,7 +143,7 @@ func WOLRoutes(r *mux.Router) {
 
 		if machine.MAC == "" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "MAC address not configured for this machine",
 			})
@@ -162,12 +162,12 @@ func WOLRoutes(r *mux.Router) {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   err.Error(),
 			})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
 				"message": fmt.Sprintf("Wake-on-LAN packet sent to %s", machine.MAC),
 			})
@@ -201,7 +201,7 @@ func WOLRoutes(r *mux.Router) {
 		machineGroups[group.ID] = &group
 		machineGroupsMu.Unlock()
 
-		AddAuditLog("create_group", "groups", "", "", map[string]interface{}{"name": group.Name}, true, "")
+		AddAuditLog("create_group", "groups", "", "", map[string]any{"name": group.Name}, true, "")
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(group)
@@ -214,7 +214,7 @@ func WOLRoutes(r *mux.Router) {
 		delete(machineGroups, id)
 		machineGroupsMu.Unlock()
 
-		AddAuditLog("delete_group", "groups", "", "", map[string]interface{}{"id": id}, true, "")
+		AddAuditLog("delete_group", "groups", "", "", map[string]any{"id": id}, true, "")
 
 		w.WriteHeader(http.StatusOK)
 	}).Methods("DELETE")
@@ -353,7 +353,7 @@ func WOLRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, machine.Password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -386,13 +386,13 @@ func WOLRoutes(r *mux.Router) {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   err.Error(),
 				"output":  string(output),
 			})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
 				"output":  string(output),
 			})

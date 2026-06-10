@@ -189,7 +189,7 @@ func GenerateToken(user *User, permissions []string) (string, error) {
 
 // ValidateToken validates a JWT token and returns the claims
 func ValidateToken(tokenString string) (*JWTClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -337,8 +337,8 @@ func getClaimsFromRequest(r *http.Request) *JWTClaims {
 
 	// Check Authorization header first
 	authHeader := r.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+	if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
+		tokenString = after
 	}
 
 	// Fall back to cookie
@@ -466,8 +466,8 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		// Check Authorization header first
 		authHeader := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
+			tokenString = after
 		}
 
 		// Fall back to cookie
@@ -534,7 +534,7 @@ func AuthRoutes(router *mux.Router) {
 			Password string `json:"password"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid request body",
 			})
@@ -544,7 +544,7 @@ func AuthRoutes(router *mux.Router) {
 		user, err := GetUserByUsername(req.Username)
 		if err != nil {
 			log.Printf("Login error: %v", err)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Authentication failed",
 			})
@@ -552,7 +552,7 @@ func AuthRoutes(router *mux.Router) {
 		}
 
 		if user == nil || !CheckPassword(req.Password, user.Password) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid username or password",
 			})
@@ -560,7 +560,7 @@ func AuthRoutes(router *mux.Router) {
 		}
 
 		if !user.IsActive {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Account is disabled",
 			})
@@ -578,7 +578,7 @@ func AuthRoutes(router *mux.Router) {
 		token, err := GenerateToken(user, permissions)
 		if err != nil {
 			log.Printf("Failed to generate token: %v", err)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to generate token",
 			})
@@ -602,10 +602,10 @@ func AuthRoutes(router *mux.Router) {
 			MaxAge:   86400, // 24 hours
 		})
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"token":   token,
-			"user": map[string]interface{}{
+			"user": map[string]any{
 				"id":           user.ID,
 				"username":     user.Username,
 				"email":        user.Email,
@@ -629,7 +629,7 @@ func AuthRoutes(router *mux.Router) {
 			MaxAge:   -1,
 		})
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 		})
 	}).Methods("POST")
@@ -650,7 +650,7 @@ func AuthRoutes(router *mux.Router) {
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"id":           user.ID,
 			"username":     user.Username,
 			"email":        user.Email,
@@ -675,8 +675,8 @@ func AuthRoutes(router *mux.Router) {
 		// Try to get token
 		tokenString := ""
 		authHeader := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
+			tokenString = after
 		}
 		if tokenString == "" {
 			if cookie, err := r.Cookie("porter_token"); err == nil {
@@ -685,7 +685,7 @@ func AuthRoutes(router *mux.Router) {
 		}
 
 		if tokenString == "" {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"authenticated": false,
 			})
 			return
@@ -693,15 +693,15 @@ func AuthRoutes(router *mux.Router) {
 
 		claims, err := ValidateToken(tokenString)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"authenticated": false,
 			})
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"authenticated": true,
-			"user": map[string]interface{}{
+			"user": map[string]any{
 				"id":          claims.UserID,
 				"username":    claims.Username,
 				"role":        claims.Role,
@@ -725,7 +725,7 @@ func AuthRoutes(router *mux.Router) {
 			NewPassword     string `json:"new_password"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid request body",
 			})
@@ -733,7 +733,7 @@ func AuthRoutes(router *mux.Router) {
 		}
 
 		if len(req.NewPassword) < 6 {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Password must be at least 6 characters",
 			})
@@ -742,7 +742,7 @@ func AuthRoutes(router *mux.Router) {
 
 		user, err := GetUserByID(claims.UserID)
 		if err != nil || user == nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "User not found",
 			})
@@ -750,7 +750,7 @@ func AuthRoutes(router *mux.Router) {
 		}
 
 		if !CheckPassword(req.CurrentPassword, user.Password) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Current password is incorrect",
 			})
@@ -759,7 +759,7 @@ func AuthRoutes(router *mux.Router) {
 
 		hashedPassword, err := HashPassword(req.NewPassword)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to hash password",
 			})
@@ -768,7 +768,7 @@ func AuthRoutes(router *mux.Router) {
 
 		_, err = db.db.Exec("UPDATE users SET password_hash = ? WHERE id = ?", hashedPassword, user.ID)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to update password",
 			})
@@ -777,7 +777,7 @@ func AuthRoutes(router *mux.Router) {
 
 		LogAudit(user.ID, user.Username, "change_password", "user", user.ID, nil, r.RemoteAddr)
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Password changed successfully",
 		})
@@ -789,7 +789,7 @@ var auditDedup = make(map[string]time.Time)
 var auditDedupMutex sync.Mutex
 
 // LogAudit logs an audit event with deduplication
-func LogAudit(userID, username, action, resourceType, resourceID string, details interface{}, ipAddress string) {
+func LogAudit(userID, username, action, resourceType, resourceID string, details any, ipAddress string) {
 	if db == nil {
 		return
 	}

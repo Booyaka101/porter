@@ -51,9 +51,7 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 	var wg sync.WaitGroup
 
 	// Stream stdout
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -64,12 +62,10 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 				callback(StreamEvent{Type: "stdout", Data: line})
 			}
 		}
-	}()
+	})
 
 	// Stream stderr
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -80,7 +76,7 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 				callback(StreamEvent{Type: "stderr", Data: line})
 			}
 		}
-	}()
+	})
 
 	// Wait for output streaming to complete
 	wg.Wait()

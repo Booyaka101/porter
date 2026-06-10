@@ -39,7 +39,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -62,7 +62,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		executor.Run("Network Ping", tasks, vars)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"output":  vars.Get("ping_result"),
 		})
@@ -89,7 +89,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -112,7 +112,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		executor.Run("Network Traceroute", tasks, vars)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"output":  vars.Get("traceroute_result"),
 		})
@@ -144,7 +144,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -154,7 +154,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 
 		// Use Porter's Capture task for each port scan
 		ports := strings.Split(reqBody.Ports, ",")
-		var results []map[string]interface{}
+		var results []map[string]any
 
 		vars := porter.NewVars()
 		vars.Set("target", reqBody.Target)
@@ -176,14 +176,14 @@ func NetworkToolsRoutes(r *mux.Router) {
 			executor.Run(fmt.Sprintf("Port Scan: %s", port), tasks, vars)
 			status := strings.TrimSpace(vars.Get("port_status"))
 
-			results = append(results, map[string]interface{}{
+			results = append(results, map[string]any{
 				"port":   portNum,
 				"status": status,
 			})
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"results": results,
 		})
@@ -215,7 +215,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -239,7 +239,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		executor.Run("DNS Lookup", tasks, vars)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"output":  vars.Get("dns_result"),
 		})
@@ -258,7 +258,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -279,7 +279,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		executor.Run("Network Interfaces", tasks, vars)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"output":  vars.Get("interfaces"),
 		})
@@ -298,7 +298,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -319,7 +319,7 @@ func NetworkToolsRoutes(r *mux.Router) {
 		executor.Run("Network Connections", tasks, vars)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"output":  vars.Get("connections"),
 		})

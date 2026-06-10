@@ -47,10 +47,10 @@ type ScriptInput struct {
 
 // APIResponse provides consistent API responses
 type APIResponse struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
-	Message string      `json:"message,omitempty"`
+	Success bool   `json:"success"`
+	Data    any    `json:"data,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // ============================================================================
@@ -478,7 +478,7 @@ func (s *CustomScriptStore) GetScriptForExecution(id string) (string, func(), er
 // ============================================================================
 
 // sendJSON sends a JSON response
-func sendJSON(w http.ResponseWriter, status int, data interface{}) {
+func sendJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
@@ -490,7 +490,7 @@ func sendError(w http.ResponseWriter, status int, message string) {
 }
 
 // sendSuccess sends a success response
-func sendSuccess(w http.ResponseWriter, data interface{}, message string) {
+func sendSuccess(w http.ResponseWriter, data any, message string) {
 	sendJSON(w, http.StatusOK, APIResponse{Success: true, Data: data, Message: message})
 }
 
@@ -690,7 +690,7 @@ func handleScriptStats(w http.ResponseWriter, req *http.Request) {
 		totalSize += s.Size
 	}
 
-	sendJSON(w, http.StatusOK, map[string]interface{}{
+	sendJSON(w, http.StatusOK, map[string]any{
 		"total":      len(scripts),
 		"categories": categories,
 		"total_size": totalSize,

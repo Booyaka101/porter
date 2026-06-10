@@ -333,7 +333,7 @@ func (h *HistoryStore) GetRecent(n int) []ExecutionRecord {
 }
 
 // GetStats returns execution statistics
-func (h *HistoryStore) GetStats() map[string]interface{} {
+func (h *HistoryStore) GetStats() map[string]any {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -377,7 +377,7 @@ func (h *HistoryStore) GetStats() map[string]interface{} {
 		topScripts = topScripts[:5]
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total":        total,
 		"successful":   successful,
 		"failed":       failed,
@@ -486,11 +486,4 @@ func RecordExecution(result ExecutionResult, scriptPath, args, presetName string
 	}
 
 	historyStore.Add(record)
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

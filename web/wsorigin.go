@@ -28,7 +28,7 @@ func checkWSOrigin(r *http.Request) bool {
 	if strings.EqualFold(u.Host, r.Host) {
 		return true
 	}
-	for _, allowed := range strings.Split(os.Getenv("PORTER_ALLOWED_ORIGINS"), ",") {
+	for allowed := range strings.SplitSeq(os.Getenv("PORTER_ALLOWED_ORIGINS"), ",") {
 		allowed = strings.TrimSpace(allowed)
 		if allowed == "" {
 			continue

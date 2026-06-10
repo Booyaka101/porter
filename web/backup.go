@@ -84,7 +84,7 @@ func BackupRoutes(r *mux.Router) {
 		backupJobs[job.ID] = &job
 		backupJobsMu.Unlock()
 
-		AddAuditLog("create_backup_job", "backup", job.MachineID, job.MachineName, map[string]interface{}{
+		AddAuditLog("create_backup_job", "backup", job.MachineID, job.MachineName, map[string]any{
 			"name":   job.Name,
 			"source": job.SourcePath,
 		}, true, "")
@@ -230,7 +230,7 @@ func BackupRoutes(r *mux.Router) {
 			}
 			backupJobsMu.Unlock()
 
-			AddAuditLog("run_backup", "backup", job.MachineID, machine.Name, map[string]interface{}{
+			AddAuditLog("run_backup", "backup", job.MachineID, machine.Name, map[string]any{
 				"job_name": job.Name,
 				"status":   status,
 				"stats":    fmt.Sprintf("ok=%d changed=%d failed=%d", stats.OK, stats.Changed, stats.Failed),
@@ -238,7 +238,7 @@ func BackupRoutes(r *mux.Router) {
 		}()
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":    true,
 			"history_id": history.ID,
 		})

@@ -306,9 +306,9 @@ func getStandaloneAgentMetrics(w http.ResponseWriter, r *http.Request) {
 // getStandaloneAgentStatus returns the status of all standalone agent connections
 func getStandaloneAgentStatus(w http.ResponseWriter, r *http.Request) {
 	standaloneAgentManager.mu.RLock()
-	status := make(map[string]interface{})
+	status := make(map[string]any)
 	for machineId, conn := range standaloneAgentManager.connections {
-		status[machineId] = map[string]interface{}{
+		status[machineId] = map[string]any{
 			"connected": true,
 			"last_seen": conn.LastSeen,
 			"metrics":   conn.Metrics,

@@ -12,10 +12,10 @@ import (
 
 // parseServices parses systemctl list-units output into service maps
 // Format: name load active sub description...
-func parseServices(output, svcType string, isUser bool) []map[string]interface{} {
-	var services []map[string]interface{}
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+func parseServices(output, svcType string, isUser bool) []map[string]any {
+	var services []map[string]any
+	lines := strings.SplitSeq(output, "\n")
+	for line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) >= 4 {
 			name := fields[0]
@@ -34,7 +34,7 @@ func parseServices(output, svcType string, isUser bool) []map[string]interface{}
 			status := fields[2]   // active/inactive
 			subState := fields[3] // running/exited/dead/etc
 
-			services = append(services, map[string]interface{}{
+			services = append(services, map[string]any{
 				"name":        name,
 				"status":      status,
 				"subState":    subState,
@@ -273,12 +273,12 @@ func SystemRoutes(r *mux.Router) {
 		}
 		defer client.Close()
 
-		var services []map[string]interface{}
+		var services []map[string]any
 
 		// Get enabled status for all services
 		enabledMap := make(map[string]bool)
 		enabledOutput, _ := client.Run("systemctl list-unit-files --type=service --no-pager --no-legend")
-		for _, line := range strings.Split(string(enabledOutput), "\n") {
+		for line := range strings.SplitSeq(string(enabledOutput), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
 				name := strings.TrimSuffix(fields[0], ".service")
@@ -302,7 +302,7 @@ func SystemRoutes(r *mux.Router) {
 			// User services enabled status
 			userEnabledOutput, _ := client.Run("systemctl --user list-unit-files --type=service --no-pager --no-legend 2>/dev/null || true")
 			userEnabledMap := make(map[string]bool)
-			for _, line := range strings.Split(string(userEnabledOutput), "\n") {
+			for line := range strings.SplitSeq(string(userEnabledOutput), "\n") {
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
 					name := strings.TrimSuffix(fields[0], ".service")
@@ -322,7 +322,7 @@ func SystemRoutes(r *mux.Router) {
 		// Timer enabled status
 		timerEnabledOutput, _ := client.Run("systemctl list-unit-files --type=timer --no-pager --no-legend")
 		timerEnabledMap := make(map[string]bool)
-		for _, line := range strings.Split(string(timerEnabledOutput), "\n") {
+		for line := range strings.SplitSeq(string(timerEnabledOutput), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
 				name := strings.TrimSuffix(fields[0], ".timer")
@@ -343,7 +343,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"services": services})
+		json.NewEncoder(w).Encode(map[string]any{"services": services})
 	}).Methods("GET")
 
 	// Get service dependencies for visualization
@@ -367,8 +367,8 @@ func SystemRoutes(r *mux.Router) {
 		output, _ := client.Run("systemctl list-units --type=service --state=running --no-pager --plain --no-legend | awk '{print $1}' | sed 's/.service$//'")
 		serviceNames := strings.Split(strings.TrimSpace(string(output)), "\n")
 
-		var nodes []map[string]interface{}
-		var edges []map[string]interface{}
+		var nodes []map[string]any
+		var edges []map[string]any
 		nodeMap := make(map[string]bool)
 
 		// For each service, get its dependencies
@@ -383,7 +383,7 @@ func SystemRoutes(r *mux.Router) {
 
 			if !nodeMap[svcName] {
 				nodeMap[svcName] = true
-				nodes = append(nodes, map[string]interface{}{
+				nodes = append(nodes, map[string]any{
 					"id":     svcName,
 					"label":  svcName,
 					"status": status,
@@ -392,15 +392,15 @@ func SystemRoutes(r *mux.Router) {
 
 			// Get dependencies (Requires, Wants, After)
 			depsOut, _ := client.Run(fmt.Sprintf("systemctl show %s.service --property=Requires,Wants,After --no-pager 2>/dev/null", svcName))
-			for _, line := range strings.Split(string(depsOut), "\n") {
+			for line := range strings.SplitSeq(string(depsOut), "\n") {
 				if strings.HasPrefix(line, "Requires=") || strings.HasPrefix(line, "Wants=") || strings.HasPrefix(line, "After=") {
 					parts := strings.SplitN(line, "=", 2)
 					if len(parts) != 2 {
 						continue
 					}
 					depType := parts[0]
-					deps := strings.Fields(parts[1])
-					for _, dep := range deps {
+					deps := strings.FieldsSeq(parts[1])
+					for dep := range deps {
 						depName := strings.TrimSuffix(dep, ".service")
 						depName = strings.TrimSuffix(depName, ".target")
 						depName = strings.TrimSuffix(depName, ".socket")
@@ -414,7 +414,7 @@ func SystemRoutes(r *mux.Router) {
 						if !nodeMap[depName] && !strings.Contains(dep, ".target") {
 							nodeMap[depName] = true
 							depStatus, _ := client.Run(fmt.Sprintf("systemctl is-active %s.service 2>/dev/null || echo inactive", depName))
-							nodes = append(nodes, map[string]interface{}{
+							nodes = append(nodes, map[string]any{
 								"id":     depName,
 								"label":  depName,
 								"status": strings.TrimSpace(string(depStatus)),
@@ -423,7 +423,7 @@ func SystemRoutes(r *mux.Router) {
 
 						// Add edge
 						if !strings.Contains(dep, ".target") {
-							edges = append(edges, map[string]interface{}{
+							edges = append(edges, map[string]any{
 								"source": depName,
 								"target": svcName,
 								"type":   depType,
@@ -435,7 +435,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"nodes": nodes,
 			"edges": edges,
 		})
@@ -484,9 +484,9 @@ func SystemRoutes(r *mux.Router) {
 			} else {
 				errMsg = fmt.Sprintf("Service %s failed", action)
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": errMsg})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": errMsg})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -521,9 +521,9 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"status": "", "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"status": "", "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"status": string(output)})
+			json.NewEncoder(w).Encode(map[string]any{"status": string(output)})
 		}
 	}).Methods("GET")
 
@@ -562,9 +562,9 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"logs": "", "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"logs": "", "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"logs": string(output)})
+			json.NewEncoder(w).Encode(map[string]any{"logs": string(output)})
 		}
 	}).Methods("GET")
 
@@ -588,8 +588,8 @@ func SystemRoutes(r *mux.Router) {
 		checkOutput, _ := client.Run("which docker 2>/dev/null || echo 'not_found'")
 		if strings.Contains(string(checkOutput), "not_found") {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"containers": []interface{}{},
+			json.NewEncoder(w).Encode(map[string]any{
+				"containers": []any{},
 				"error":      "Docker is not installed on this machine",
 			})
 			return
@@ -601,22 +601,22 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(sudoCmd)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"containers": []interface{}{},
+			json.NewEncoder(w).Encode(map[string]any{
+				"containers": []any{},
 				"error":      "Failed to list containers: " + err.Error(),
 			})
 			return
 		}
 
-		var containers []map[string]interface{}
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
+		var containers []map[string]any
+		lines := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
+		for line := range lines {
 			if line == "" {
 				continue
 			}
 			parts := strings.Split(line, "|")
 			if len(parts) >= 7 {
-				containers = append(containers, map[string]interface{}{
+				containers = append(containers, map[string]any{
 					"id":      parts[0],
 					"name":    parts[1],
 					"image":   parts[2],
@@ -629,7 +629,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"containers": containers})
+		json.NewEncoder(w).Encode(map[string]any{"containers": containers})
 	}).Methods("GET")
 
 	r.HandleFunc("/api/machines/{id}/docker/images", func(w http.ResponseWriter, req *http.Request) {
@@ -651,19 +651,19 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(sudoStdin(password) + "docker images --format '{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}' 2>/dev/null")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"images": []interface{}{}})
+			json.NewEncoder(w).Encode(map[string]any{"images": []any{}})
 			return
 		}
 
-		var images []map[string]interface{}
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
+		var images []map[string]any
+		lines := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
+		for line := range lines {
 			if line == "" {
 				continue
 			}
 			parts := strings.Split(line, "|")
 			if len(parts) >= 5 {
-				images = append(images, map[string]interface{}{
+				images = append(images, map[string]any{
 					"id":         parts[0],
 					"repository": parts[1],
 					"tag":        parts[2],
@@ -674,7 +674,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"images": images})
+		json.NewEncoder(w).Encode(map[string]any{"images": images})
 	}).Methods("GET")
 
 	r.HandleFunc("/api/machines/{id}/docker/volumes", func(w http.ResponseWriter, req *http.Request) {
@@ -696,19 +696,19 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(sudoStdin(password) + "docker volume ls --format '{{.Name}}|{{.Driver}}|{{.Mountpoint}}' 2>/dev/null")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"volumes": []interface{}{}})
+			json.NewEncoder(w).Encode(map[string]any{"volumes": []any{}})
 			return
 		}
 
-		var volumes []map[string]interface{}
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
+		var volumes []map[string]any
+		lines := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
+		for line := range lines {
 			if line == "" {
 				continue
 			}
 			parts := strings.Split(line, "|")
 			if len(parts) >= 2 {
-				vol := map[string]interface{}{
+				vol := map[string]any{
 					"name":   parts[0],
 					"driver": parts[1],
 				}
@@ -720,7 +720,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"volumes": volumes})
+		json.NewEncoder(w).Encode(map[string]any{"volumes": volumes})
 	}).Methods("GET")
 
 	r.HandleFunc("/api/machines/{id}/docker/networks", func(w http.ResponseWriter, req *http.Request) {
@@ -742,19 +742,19 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(sudoStdin(password) + "docker network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}' 2>/dev/null")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"networks": []interface{}{}})
+			json.NewEncoder(w).Encode(map[string]any{"networks": []any{}})
 			return
 		}
 
-		var networks []map[string]interface{}
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
+		var networks []map[string]any
+		lines := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
+		for line := range lines {
 			if line == "" {
 				continue
 			}
 			parts := strings.Split(line, "|")
 			if len(parts) >= 4 {
-				networks = append(networks, map[string]interface{}{
+				networks = append(networks, map[string]any{
 					"id":     parts[0],
 					"name":   parts[1],
 					"driver": parts[2],
@@ -764,7 +764,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"networks": networks})
+		json.NewEncoder(w).Encode(map[string]any{"networks": networks})
 	}).Methods("GET")
 
 	r.HandleFunc("/api/machines/{id}/docker/info", func(w http.ResponseWriter, req *http.Request) {
@@ -786,7 +786,7 @@ func SystemRoutes(r *mux.Router) {
 		checkOutput, _ := client.Run("which docker 2>/dev/null || echo 'not_found'")
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(string(checkOutput), "not_found") {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error": "Docker is not installed on this machine",
 			})
 			return
@@ -795,14 +795,14 @@ func SystemRoutes(r *mux.Router) {
 		password := GetDecryptedPassword(machine)
 		output, err := client.Run(sudoStdin(password) + "docker info --format '{{.Containers}}|{{.ContainersRunning}}|{{.Images}}' 2>/dev/null")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error": "Failed to get Docker info: " + err.Error(),
 			})
 			return
 		}
 
 		parts := strings.Split(strings.TrimSpace(string(output)), "|")
-		info := map[string]interface{}{}
+		info := map[string]any{}
 		if len(parts) >= 3 {
 			info["containers"] = parts[0]
 			info["containersRunning"] = parts[1]
@@ -852,22 +852,22 @@ func SystemRoutes(r *mux.Router) {
 			output, err := client.Run(sudoPrefix + "docker logs --tail " + lines + " " + containerID + " 2>&1")
 			w.Header().Set("Content-Type", "application/json")
 			if err != nil {
-				json.NewEncoder(w).Encode(map[string]interface{}{"logs": "", "error": err.Error()})
+				json.NewEncoder(w).Encode(map[string]any{"logs": "", "error": err.Error()})
 			} else {
-				json.NewEncoder(w).Encode(map[string]interface{}{"logs": string(output)})
+				json.NewEncoder(w).Encode(map[string]any{"logs": string(output)})
 			}
 			return
 		case "inspect":
 			output, err := client.Run(sudoPrefix + "docker inspect " + containerID + " 2>/dev/null")
 			w.Header().Set("Content-Type", "application/json")
 			if err != nil {
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			} else {
-				var data interface{}
+				var data any
 				if jsonErr := json.Unmarshal(output, &data); jsonErr != nil {
-					json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to parse: " + jsonErr.Error()})
+					json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Failed to parse: " + jsonErr.Error()})
 				} else {
-					json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": data})
+					json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
 				}
 			}
 			return
@@ -875,7 +875,7 @@ func SystemRoutes(r *mux.Router) {
 			output, err := client.Run(sudoPrefix + "docker stats " + containerID + " --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}' 2>/dev/null")
 			w.Header().Set("Content-Type", "application/json")
 			if err != nil {
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			} else {
 				parts := strings.Split(strings.TrimSpace(string(output)), "|")
 				stats := map[string]string{"cpu": "0%", "memory": "0MB"}
@@ -883,7 +883,7 @@ func SystemRoutes(r *mux.Router) {
 					stats["cpu"] = parts[0]
 					stats["memory"] = parts[1]
 				}
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "stats": stats})
+				json.NewEncoder(w).Encode(map[string]any{"success": true, "stats": stats})
 			}
 			return
 		case "rename":
@@ -897,9 +897,9 @@ func SystemRoutes(r *mux.Router) {
 			_, err = client.Run(sudoPrefix + "docker rename " + containerID + " " + request.Name + " 2>&1")
 			w.Header().Set("Content-Type", "application/json")
 			if err != nil {
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			} else {
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+				json.NewEncoder(w).Encode(map[string]any{"success": true})
 			}
 			return
 		default:
@@ -910,9 +910,9 @@ func SystemRoutes(r *mux.Router) {
 		_, err = client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST", "GET")
 
@@ -952,9 +952,9 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "output": string(output)})
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "output": string(output)})
 		}
 	}).Methods("POST")
 
@@ -998,9 +998,9 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(cmd)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "output": string(output)})
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "output": string(output)})
 		}
 	}).Methods("POST")
 
@@ -1032,9 +1032,9 @@ func SystemRoutes(r *mux.Router) {
 		_, err = client.Run(sudoStdin(password) + "docker pull " + request.Image + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -1071,48 +1071,49 @@ func SystemRoutes(r *mux.Router) {
 		password := GetDecryptedPassword(machine)
 
 		// Build docker run command
-		cmd := "docker run"
+		var cmd strings.Builder
+		cmd.WriteString("docker run")
 		if request.Detach {
-			cmd += " -d"
+			cmd.WriteString(" -d")
 		}
 		if request.Name != "" {
-			cmd += " --name " + request.Name
+			cmd.WriteString(" --name " + request.Name)
 		}
 		if request.Ports != "" {
-			for _, p := range strings.Split(request.Ports, ",") {
+			for p := range strings.SplitSeq(request.Ports, ",") {
 				p = strings.TrimSpace(p)
 				if p != "" {
-					cmd += " -p " + p
+					cmd.WriteString(" -p " + p)
 				}
 			}
 		}
 		if request.Volumes != "" {
-			for _, v := range strings.Split(request.Volumes, ",") {
+			for v := range strings.SplitSeq(request.Volumes, ",") {
 				v = strings.TrimSpace(v)
 				if v != "" {
-					cmd += " -v " + v
+					cmd.WriteString(" -v " + v)
 				}
 			}
 		}
 		if request.Env != "" {
-			for _, e := range strings.Split(request.Env, ",") {
+			for e := range strings.SplitSeq(request.Env, ",") {
 				e = strings.TrimSpace(e)
 				if e != "" {
-					cmd += " -e " + e
+					cmd.WriteString(" -e " + e)
 				}
 			}
 		}
 		if request.Network != "" {
-			cmd += " --network " + request.Network
+			cmd.WriteString(" --network " + request.Network)
 		}
-		cmd += " " + request.Image
+		cmd.WriteString(" " + request.Image)
 
-		output, err := client.Run(sudoStdin(password) + cmd + " 2>&1")
+		output, err := client.Run(sudoStdin(password) + cmd.String() + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "containerId": strings.TrimSpace(string(output))})
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "containerId": strings.TrimSpace(string(output))})
 		}
 	}).Methods("POST")
 
@@ -1139,13 +1140,13 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(sudoStdin(password) + "docker inspect " + containerID + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			var data interface{}
+			var data any
 			if jsonErr := json.Unmarshal(output, &data); jsonErr != nil {
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to parse inspect data"})
+				json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Failed to parse inspect data"})
 			} else {
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": data})
+				json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
 			}
 		}
 	}).Methods("GET")
@@ -1173,7 +1174,7 @@ func SystemRoutes(r *mux.Router) {
 		output, err := client.Run(sudoStdin(password) + "docker stats " + containerID + " --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}' 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
 			parts := strings.Split(strings.TrimSpace(string(output)), "|")
 			stats := map[string]string{"cpu": "0%", "memory": "0MB"}
@@ -1181,7 +1182,7 @@ func SystemRoutes(r *mux.Router) {
 				stats["cpu"] = parts[0]
 				stats["memory"] = parts[1]
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "stats": stats})
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "stats": stats})
 		}
 	}).Methods("GET")
 
@@ -1218,9 +1219,9 @@ func SystemRoutes(r *mux.Router) {
 		_, err = client.Run(sudoStdin(password) + "docker volume create --driver " + driver + " " + request.Name + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -1247,9 +1248,9 @@ func SystemRoutes(r *mux.Router) {
 		_, err = client.Run(sudoStdin(password) + "docker volume rm " + volumeName + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("DELETE")
 
@@ -1286,9 +1287,9 @@ func SystemRoutes(r *mux.Router) {
 		_, err = client.Run(sudoStdin(password) + "docker network create --driver " + driver + " " + request.Name + " 2>&1")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("POST")
 
@@ -1315,9 +1316,9 @@ func SystemRoutes(r *mux.Router) {
 		_, err = client.Run(sudoStdin(password) + "docker network rm " + networkID + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("DELETE")
 
@@ -1344,9 +1345,9 @@ func SystemRoutes(r *mux.Router) {
 		_, err = client.Run(sudoStdin(password) + "docker rmi " + imageID + " 2>/dev/null")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		} else {
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}).Methods("DELETE")
 
@@ -1364,7 +1365,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 		if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid request body",
 			})
@@ -1374,7 +1375,7 @@ func SystemRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, machine.Password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -1402,7 +1403,7 @@ func SystemRoutes(r *mux.Router) {
 		}
 
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success":  false,
 				"error":    err.Error(),
 				"output":   cleanOutput,
@@ -1411,7 +1412,7 @@ func SystemRoutes(r *mux.Router) {
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":  true,
 			"output":   cleanOutput,
 			"exitCode": exitCode,

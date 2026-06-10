@@ -36,7 +36,7 @@ func DiffRoutes(r *mux.Router) {
 		client1, err := porter.Connect(machine1.IP, porter.DefaultConfig(machine1.Username, machine1.Password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("Failed to connect to %s: %s", machine1.Name, err.Error()),
 			})
@@ -47,7 +47,7 @@ func DiffRoutes(r *mux.Router) {
 		content1, err := client1.Run(fmt.Sprintf("cat '%s' 2>&1", reqBody.FilePath))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("Failed to read file from %s: %s", machine1.Name, err.Error()),
 			})
@@ -58,7 +58,7 @@ func DiffRoutes(r *mux.Router) {
 		client2, err := porter.Connect(machine2.IP, porter.DefaultConfig(machine2.Username, machine2.Password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("Failed to connect to %s: %s", machine2.Name, err.Error()),
 			})
@@ -69,7 +69,7 @@ func DiffRoutes(r *mux.Router) {
 		content2, err := client2.Run(fmt.Sprintf("cat '%s' 2>&1", reqBody.FilePath))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("Failed to read file from %s: %s", machine2.Name, err.Error()),
 			})
@@ -80,7 +80,7 @@ func DiffRoutes(r *mux.Router) {
 		diff := generateDiff(string(content1), string(content2))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":   true,
 			"machine1":  machine1.Name,
 			"machine2":  machine2.Name,
@@ -113,7 +113,7 @@ func DiffRoutes(r *mux.Router) {
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, machine.Password))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Connection failed: " + err.Error(),
 			})
@@ -125,7 +125,7 @@ func DiffRoutes(r *mux.Router) {
 		output, _ := client.Run(fmt.Sprintf("diff -u '%s' '%s' 2>&1", reqBody.File1, reqBody.File2))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":   true,
 			"diff":      string(output),
 			"identical": len(output) == 0,

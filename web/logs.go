@@ -101,7 +101,7 @@ func LogsRoutes(r *mux.Router) {
 		machineID := mux.Vars(req)["machineId"]
 		count := logStreamManager.StopByMachineID(machineID)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"stopped": count,
 		})
 	}).Methods("POST", "GET")
@@ -139,7 +139,7 @@ func LogsRoutes(r *mux.Router) {
 		// Connect to machine
 		client, err := porter.Connect(machine.IP, porter.DefaultConfig(machine.Username, machine.Password))
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("Connection failed: %v", err),
 			})
@@ -196,7 +196,7 @@ func LogsRoutes(r *mux.Router) {
 
 		if err != nil {
 			client.Close()
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("Failed to start stream: %v", err),
 			})
@@ -213,7 +213,7 @@ func LogsRoutes(r *mux.Router) {
 			logStreamManager.StopSession(sessionID)
 		}()
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success":    true,
 			"session_id": sessionID,
 			"message":    "Log stream started. Connect to /api/logs/stream/" + sessionID + " for SSE events.",
@@ -225,7 +225,7 @@ func LogsRoutes(r *mux.Router) {
 		id := mux.Vars(req)["id"]
 
 		if logStreamManager.StopSession(id) {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
 				"message": "Stream stopped",
 			})

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -32,7 +34,7 @@ func UserRoutes(router *mux.Router) {
 		}
 		defer rows.Close()
 
-		var users []map[string]interface{}
+		var users []map[string]any
 		for rows.Next() {
 			var id, username, role string
 			var email, displayName, avatarURL sql.NullString
@@ -44,7 +46,7 @@ func UserRoutes(router *mux.Router) {
 				continue
 			}
 
-			user := map[string]interface{}{
+			user := map[string]any{
 				"id":        id,
 				"username":  username,
 				"role":      role,
@@ -98,7 +100,7 @@ func UserRoutes(router *mux.Router) {
 			DisplayName string `json:"display_name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid request body",
 			})
@@ -106,7 +108,7 @@ func UserRoutes(router *mux.Router) {
 		}
 
 		if req.Username == "" || req.Password == "" {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Username and password are required",
 			})
@@ -114,7 +116,7 @@ func UserRoutes(router *mux.Router) {
 		}
 
 		if len(req.Password) < 6 {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Password must be at least 6 characters",
 			})
@@ -124,7 +126,7 @@ func UserRoutes(router *mux.Router) {
 		// Check if username exists
 		existing, _ := GetUserByUsername(req.Username)
 		if existing != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Username already exists",
 			})
@@ -138,15 +140,9 @@ func UserRoutes(router *mux.Router) {
 
 		// Validate role
 		validRoles := []string{"admin", "operator", "viewer"}
-		roleValid := false
-		for _, r := range validRoles {
-			if req.Role == r {
-				roleValid = true
-				break
-			}
-		}
+		roleValid := slices.Contains(validRoles, req.Role)
 		if !roleValid {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid role. Must be: admin, operator, or viewer",
 			})
@@ -155,7 +151,7 @@ func UserRoutes(router *mux.Router) {
 
 		hashedPassword, err := HashPassword(req.Password)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to hash password",
 			})
@@ -165,7 +161,7 @@ func UserRoutes(router *mux.Router) {
 		id := fmt.Sprintf("user-%d", time.Now().UnixNano())
 
 		// Use NULL for empty email to avoid unique constraint issues
-		var emailValue interface{}
+		var emailValue any
 		if req.Email != "" {
 			emailValue = req.Email
 		} else {
@@ -177,7 +173,7 @@ func UserRoutes(router *mux.Router) {
 			VALUES (?, ?, ?, ?, ?, ?, 1)`,
 			id, req.Username, emailValue, hashedPassword, req.Role, req.DisplayName)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to create user: " + err.Error(),
 			})
@@ -187,7 +183,7 @@ func UserRoutes(router *mux.Router) {
 		LogAudit(claims.UserID, claims.Username, "create_user", "user", id,
 			map[string]string{"username": req.Username, "role": req.Role}, r.RemoteAddr)
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"id":      id,
 			"message": "User created successfully",
@@ -218,7 +214,7 @@ func UserRoutes(router *mux.Router) {
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"id":           user.ID,
 			"username":     user.Username,
 			"email":        user.Email,
@@ -261,7 +257,7 @@ func UserRoutes(router *mux.Router) {
 			Password    string `json:"password"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Invalid request body",
 			})
@@ -270,7 +266,7 @@ func UserRoutes(router *mux.Router) {
 
 		// Build update query
 		updates := []string{}
-		args := []interface{}{}
+		args := []any{}
 
 		if req.Email != "" {
 			updates = append(updates, "email = ?")
@@ -305,7 +301,7 @@ func UserRoutes(router *mux.Router) {
 		}
 
 		if len(updates) == 0 {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "No fields to update",
 			})
@@ -318,7 +314,7 @@ func UserRoutes(router *mux.Router) {
 
 		_, err := db.db.Exec(query, args...)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to update user",
 			})
@@ -327,7 +323,7 @@ func UserRoutes(router *mux.Router) {
 
 		LogAudit(claims.UserID, claims.Username, "update_user", "user", id, nil, r.RemoteAddr)
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "User updated successfully",
 		})
@@ -347,7 +343,7 @@ func UserRoutes(router *mux.Router) {
 
 		// Prevent deleting yourself
 		if id == claims.UserID {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Cannot delete your own account",
 			})
@@ -362,7 +358,7 @@ func UserRoutes(router *mux.Router) {
 		db.db.QueryRow("SELECT role FROM users WHERE id = ?", id).Scan(&targetRole)
 
 		if targetRole == "admin" && adminCount <= 1 {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Cannot delete the last admin user",
 			})
@@ -371,7 +367,7 @@ func UserRoutes(router *mux.Router) {
 
 		_, err := db.db.Exec("DELETE FROM users WHERE id = ?", id)
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "Failed to delete user",
 			})
@@ -380,7 +376,7 @@ func UserRoutes(router *mux.Router) {
 
 		LogAudit(claims.UserID, claims.Username, "delete_user", "user", id, nil, r.RemoteAddr)
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "User deleted successfully",
 		})
@@ -435,7 +431,7 @@ func UserRoutes(router *mux.Router) {
 		}
 		defer rows.Close()
 
-		var logs []map[string]interface{}
+		var logs []map[string]any
 		for rows.Next() {
 			var id, action string
 			var userID, username, resourceType, resourceID, details, ipAddress, createdAt sql.NullString
@@ -445,7 +441,7 @@ func UserRoutes(router *mux.Router) {
 				continue
 			}
 
-			log := map[string]interface{}{
+			log := map[string]any{
 				"id":     id,
 				"action": action,
 			}
@@ -470,7 +466,7 @@ func UserRoutes(router *mux.Router) {
 				log["ip_address"] = ipAddress.String
 			}
 			if details.Valid {
-				var d interface{}
+				var d any
 				json.Unmarshal([]byte(details.String), &d)
 				log["details"] = d
 			}
@@ -485,9 +481,10 @@ func joinStrings(strs []string, sep string) string {
 	if len(strs) == 0 {
 		return ""
 	}
-	result := strs[0]
+	var result strings.Builder
+	result.WriteString(strs[0])
 	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
+		result.WriteString(sep + strs[i])
 	}
-	return result
+	return result.String()
 }

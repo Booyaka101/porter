@@ -115,7 +115,7 @@ func TestRateLimiter(t *testing.T) {
 	rl := NewRateLimiter(3, 100*time.Millisecond) // 3 requests per 100ms
 
 	// First 3 requests should be allowed
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if !rl.Allow("test-key") {
 			t.Errorf("Request %d should be allowed", i+1)
 		}

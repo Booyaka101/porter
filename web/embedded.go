@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -102,11 +103,8 @@ func GetRequiredDownloads(scriptDir string, enabledFlags []string) ([]DownloadCo
 	var required []DownloadConfig
 	for _, file := range config.Files {
 		for _, flag := range enabledFlags {
-			for _, requiredBy := range file.RequiredBy {
-				if flag == requiredBy {
-					required = append(required, file)
-					break
-				}
+			if slices.Contains(file.RequiredBy, flag) {
+				required = append(required, file)
 			}
 		}
 	}

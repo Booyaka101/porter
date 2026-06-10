@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,10 +39,10 @@ func (l LogLevel) String() string {
 
 // LogEntry represents a structured log entry
 type LogEntry struct {
-	Timestamp string                 `json:"timestamp"`
-	Level     string                 `json:"level"`
-	Message   string                 `json:"message"`
-	Fields    map[string]interface{} `json:"fields,omitempty"`
+	Timestamp string         `json:"timestamp"`
+	Level     string         `json:"level"`
+	Message   string         `json:"message"`
+	Fields    map[string]any `json:"fields,omitempty"`
 }
 
 // Logger provides structured logging capabilities
@@ -48,7 +50,7 @@ type Logger struct {
 	mu       sync.Mutex
 	level    LogLevel
 	output   io.Writer
-	fields   map[string]interface{}
+	fields   map[string]any
 	logFile  *os.File
 	filePath string
 }
@@ -80,7 +82,7 @@ func NewLogger() *Logger {
 	return &Logger{
 		level:    LevelInfo,
 		output:   os.Stdout,
-		fields:   make(map[string]interface{}),
+		fields:   make(map[string]any),
 		logFile:  logFile,
 		filePath: logPath,
 	}
@@ -94,41 +96,35 @@ func (l *Logger) SetLevel(level LogLevel) {
 }
 
 // WithField returns a new logger with an additional field
-func (l *Logger) WithField(key string, value interface{}) *Logger {
+func (l *Logger) WithField(key string, value any) *Logger {
 	newLogger := &Logger{
 		level:    l.level,
 		output:   l.output,
-		fields:   make(map[string]interface{}),
+		fields:   make(map[string]any),
 		logFile:  l.logFile,
 		filePath: l.filePath,
 	}
-	for k, v := range l.fields {
-		newLogger.fields[k] = v
-	}
+	maps.Copy(newLogger.fields, l.fields)
 	newLogger.fields[key] = value
 	return newLogger
 }
 
 // WithFields returns a new logger with additional fields
-func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
+func (l *Logger) WithFields(fields map[string]any) *Logger {
 	newLogger := &Logger{
 		level:    l.level,
 		output:   l.output,
-		fields:   make(map[string]interface{}),
+		fields:   make(map[string]any),
 		logFile:  l.logFile,
 		filePath: l.filePath,
 	}
-	for k, v := range l.fields {
-		newLogger.fields[k] = v
-	}
-	for k, v := range fields {
-		newLogger.fields[k] = v
-	}
+	maps.Copy(newLogger.fields, l.fields)
+	maps.Copy(newLogger.fields, fields)
 	return newLogger
 }
 
 // log writes a log entry
-func (l *Logger) log(level LogLevel, msg string, fields map[string]interface{}) {
+func (l *Logger) log(level LogLevel, msg string, fields map[string]any) {
 	if level < l.level {
 		return
 	}
@@ -140,16 +136,12 @@ func (l *Logger) log(level LogLevel, msg string, fields map[string]interface{}) 
 		Timestamp: time.Now().Format(time.RFC3339),
 		Level:     level.String(),
 		Message:   msg,
-		Fields:    make(map[string]interface{}),
+		Fields:    make(map[string]any),
 	}
 
 	// Merge logger fields with call-specific fields
-	for k, v := range l.fields {
-		entry.Fields[k] = v
-	}
-	for k, v := range fields {
-		entry.Fields[k] = v
-	}
+	maps.Copy(entry.Fields, l.fields)
+	maps.Copy(entry.Fields, fields)
 
 	// JSON output for file
 	if l.logFile != nil {
@@ -172,14 +164,14 @@ func (l *Logger) log(level LogLevel, msg string, fields map[string]interface{}) 
 	}
 
 	timestamp := time.Now().Format("15:04:05")
-	fieldsStr := ""
+	var fieldsStr strings.Builder
 	if len(entry.Fields) > 0 {
 		for k, v := range entry.Fields {
-			fieldsStr += fmt.Sprintf(" %s=%v", k, v)
+			fieldsStr.WriteString(fmt.Sprintf(" %s=%v", k, v))
 		}
 	}
 
-	fmt.Fprintf(l.output, "%s %s%-5s\033[0m %s%s\n", timestamp, levelColor, level.String(), msg, fieldsStr)
+	fmt.Fprintf(l.output, "%s %s%-5s\033[0m %s%s\n", timestamp, levelColor, level.String(), msg, fieldsStr.String())
 }
 
 // Debug logs a debug message
@@ -203,22 +195,22 @@ func (l *Logger) Error(msg string) {
 }
 
 // Debugf logs a formatted debug message
-func (l *Logger) Debugf(format string, args ...interface{}) {
+func (l *Logger) Debugf(format string, args ...any) {
 	l.log(LevelDebug, fmt.Sprintf(format, args...), nil)
 }
 
 // Infof logs a formatted info message
-func (l *Logger) Infof(format string, args ...interface{}) {
+func (l *Logger) Infof(format string, args ...any) {
 	l.log(LevelInfo, fmt.Sprintf(format, args...), nil)
 }
 
 // Warnf logs a formatted warning message
-func (l *Logger) Warnf(format string, args ...interface{}) {
+func (l *Logger) Warnf(format string, args ...any) {
 	l.log(LevelWarn, fmt.Sprintf(format, args...), nil)
 }
 
 // Errorf logs a formatted error message
-func (l *Logger) Errorf(format string, args ...interface{}) {
+func (l *Logger) Errorf(format string, args ...any) {
 	l.log(LevelError, fmt.Sprintf(format, args...), nil)
 }
 
@@ -239,21 +231,21 @@ func Log() *Logger {
 }
 
 // LogInfo logs an info message with fields
-func LogInfo(msg string, fields map[string]interface{}) {
+func LogInfo(msg string, fields map[string]any) {
 	GetLogger().log(LevelInfo, msg, fields)
 }
 
 // LogError logs an error message with fields
-func LogError(msg string, fields map[string]interface{}) {
+func LogError(msg string, fields map[string]any) {
 	GetLogger().log(LevelError, msg, fields)
 }
 
 // LogWarn logs a warning message with fields
-func LogWarn(msg string, fields map[string]interface{}) {
+func LogWarn(msg string, fields map[string]any) {
 	GetLogger().log(LevelWarn, msg, fields)
 }
 
 // LogDebug logs a debug message with fields
-func LogDebug(msg string, fields map[string]interface{}) {
+func LogDebug(msg string, fields map[string]any) {
 	GetLogger().log(LevelDebug, msg, fields)
 }

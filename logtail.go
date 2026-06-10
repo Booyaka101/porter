@@ -203,9 +203,7 @@ func startLogStream(client *goph.Client, cmd string, source string, callback Log
 	var wg sync.WaitGroup
 
 	// Stream stdout
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			select {
@@ -220,12 +218,10 @@ func startLogStream(client *goph.Client, cmd string, source string, callback Log
 				}
 			}
 		}
-	}()
+	})
 
 	// Stream stderr (often contains log output too)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			select {
@@ -240,7 +236,7 @@ func startLogStream(client *goph.Client, cmd string, source string, callback Log
 				}
 			}
 		}
-	}()
+	})
 
 	// Cleanup goroutine
 	go func() {

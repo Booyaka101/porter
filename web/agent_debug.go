@@ -137,7 +137,7 @@ func detectCategories(message string) []debugCategory {
 func parseServicesFromContext(ctx string) []serviceInfo {
 	var services []serviceInfo
 	inServices := false
-	for _, line := range strings.Split(ctx, "\n") {
+	for line := range strings.SplitSeq(ctx, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "SERVICES:" {
 			inServices = true
@@ -398,7 +398,7 @@ func AIAgentDebugRoutes(r *mux.Router) {
 
 		config := GetAIAgentConfig()
 		if config == nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error": "AI Agent not configured",
 			})
 			return
@@ -431,7 +431,7 @@ func AIAgentDebugRoutes(r *mux.Router) {
 			}
 		}
 		if len(targetMachines) == 0 {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error": "No target machines identified. Select machines or mention a machine name.",
 			})
 			return
@@ -464,7 +464,7 @@ func AIAgentDebugRoutes(r *mux.Router) {
 		}
 
 		if len(allCmds) == 0 {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error": "Could not determine what to investigate. Please be more specific.",
 			})
 			return

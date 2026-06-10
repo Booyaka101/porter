@@ -25,8 +25,8 @@ type ScheduledJob struct {
 	CronExpr     string    `json:"cron_expr"`
 	Enabled      bool      `json:"enabled"`
 	CreatedAt    time.Time `json:"created_at"`
-	LastRun      time.Time `json:"last_run,omitempty"`
-	NextRun      time.Time `json:"next_run,omitempty"`
+	LastRun      time.Time `json:"last_run"`
+	NextRun      time.Time `json:"next_run"`
 	LastStatus   string    `json:"last_status,omitempty"`
 	LastError    string    `json:"last_error,omitempty"`
 	RunCount     int       `json:"run_count"`
@@ -618,7 +618,7 @@ func SchedulerRoutes(r *mux.Router) {
 
 		go scheduler.executeJob(job.ID)
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Job execution started",
 		})

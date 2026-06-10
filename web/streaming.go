@@ -292,9 +292,7 @@ func executeWithStreamingSSH(m *Machine, cmd, execID string) (string, error) {
 	var wg sync.WaitGroup
 
 	// Stream stdout
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -309,12 +307,10 @@ func executeWithStreamingSSH(m *Machine, cmd, execID string) (string, error) {
 				Timestamp: time.Now(),
 			})
 		}
-	}()
+	})
 
 	// Stream stderr
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -329,7 +325,7 @@ func executeWithStreamingSSH(m *Machine, cmd, execID string) (string, error) {
 				Timestamp: time.Now(),
 			})
 		}
-	}()
+	})
 
 	// Wait for output streaming to complete
 	wg.Wait()

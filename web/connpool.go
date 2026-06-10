@@ -82,7 +82,7 @@ func (p *ConnectionPool) cleanup() {
 	for id, conn := range p.connections {
 		// Remove if too old or idle too long
 		if now.Sub(conn.CreatedAt) > p.maxAge || (!conn.InUse && now.Sub(conn.LastUsed) > p.maxIdle) {
-			LogDebug("Closing stale connection", map[string]interface{}{
+			LogDebug("Closing stale connection", map[string]any{
 				"machine_id": id,
 				"age":        now.Sub(conn.CreatedAt).String(),
 				"idle":       now.Sub(conn.LastUsed).String(),
@@ -104,7 +104,7 @@ func (p *ConnectionPool) Get(machine *Machine) (*goph.Client, error) {
 		if p.isAlive(conn.Client) {
 			conn.LastUsed = time.Now()
 			conn.InUse = true
-			LogDebug("Reusing pooled connection", map[string]interface{}{
+			LogDebug("Reusing pooled connection", map[string]any{
 				"machine_id": machine.ID,
 				"age":        time.Since(conn.CreatedAt).String(),
 			})
@@ -131,7 +131,7 @@ func (p *ConnectionPool) Get(machine *Machine) (*goph.Client, error) {
 		InUse:     true,
 	}
 
-	LogDebug("Created new pooled connection", map[string]interface{}{
+	LogDebug("Created new pooled connection", map[string]any{
 		"machine_id": machine.ID,
 		"ip":         machine.IP,
 	})
@@ -169,7 +169,7 @@ func (p *ConnectionPool) isAlive(client *goph.Client) bool {
 }
 
 // Stats returns pool statistics
-func (p *ConnectionPool) Stats() map[string]interface{} {
+func (p *ConnectionPool) Stats() map[string]any {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -183,7 +183,7 @@ func (p *ConnectionPool) Stats() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total":  len(p.connections),
 		"in_use": inUse,
 		"idle":   idle,
