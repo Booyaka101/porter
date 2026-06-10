@@ -4,7 +4,9 @@
 *.dll
 *.so
 *.dylib
-porter
+/porter
+/porter-ui
+/porter-ui-*
 cmd/porter-ui/porter-ui
 
 # Test binary
