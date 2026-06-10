@@ -37,6 +37,25 @@ func TestCheckWSOrigin(t *testing.T) {
 	}
 }
 
+func TestAuthEnabledSecureByDefault(t *testing.T) {
+	t.Setenv("PORTER_AUTH", "")
+	if !authEnabled() {
+		t.Error("auth must be ON by default (secure default)")
+	}
+	for _, v := range []string{"0", "false", "no", "off", "OFF", " no "} {
+		t.Setenv("PORTER_AUTH", v)
+		if authEnabled() {
+			t.Errorf("PORTER_AUTH=%q should disable auth", v)
+		}
+	}
+	for _, v := range []string{"1", "true", "yes", "on", "anythingelse"} {
+		t.Setenv("PORTER_AUTH", v)
+		if !authEnabled() {
+			t.Errorf("PORTER_AUTH=%q should keep auth on", v)
+		}
+	}
+}
+
 func TestAgentTokenValid(t *testing.T) {
 	// No token configured -> channels stay open.
 	t.Run("unset = open", func(t *testing.T) {

@@ -576,6 +576,43 @@ func (e *Executor) dispatch(t Task, vars *Vars) error {
 		}
 		sc, sudo := systemctlPrefix(t.User)
 		return e.runMaybeSudo(sudo, sc+"enable "+shellEscape(dest))
+	case "ensure_cron":
+		// Present if an exact crontab line already matches.
+		if _, err := e.runCapture("crontab -l 2>/dev/null | grep -qxF -- " + shellEscape(body)); err == nil {
+			e.noOp = true
+			return nil
+		}
+		return e.run("(crontab -l 2>/dev/null; printf '%s\\n' " + shellEscape(body) + ") | crontab -")
+	case "ensure_user":
+		if _, err := e.runCapture("id " + shellEscape(dest) + " >/dev/null 2>&1"); err == nil {
+			e.noOp = true
+			return nil
+		}
+		return e.runSudo(e.buildUserCmd("useradd", dest, body))
+	case "ensure_mode":
+		if e.modeMatches(dest, perm, t.Sudo) {
+			e.noOp = true
+			return nil
+		}
+		return e.runMaybeSudo(t.Sudo, "chmod "+perm+" "+shellEscape(dest))
+	case "ensure_owner":
+		if e.ownerMatches(dest, own, t.Sudo) {
+			e.noOp = true
+			return nil
+		}
+		flag := ""
+		if t.Rec {
+			flag = "-R "
+		}
+		return e.runMaybeSudo(t.Sudo, "chown "+flag+own+" "+shellEscape(dest))
+	case "ensure_absent":
+		if !e.pathExists(dest) {
+			e.noOp = true
+			return nil
+		}
+		return e.runMaybeSudo(t.Sudo, "rm -rf "+shellEscape(dest))
+	case "ensure_git_repo":
+		return e.ensureGitRepo(src, dest)
 
 	// Declarative health assertions (Goss-style; fail closed)
 	case "assert_service_active":

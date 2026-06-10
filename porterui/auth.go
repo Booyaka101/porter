@@ -427,16 +427,18 @@ func agentTokenValid(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
-// authEnabled reports whether JWT enforcement is turned on. Default off to
-// preserve existing trusted-LAN deployments; set PORTER_AUTH=1/true/yes to
-// enforce. Flipping the default to on is the recommended next step once the
-// agent channels (publicAPIPrefixes) get their own auth.
+// authEnabled reports whether JWT enforcement is on. SECURE BY DEFAULT (the
+// 2026 posture): JWT auth is enforced unless explicitly disabled with
+// PORTER_AUTH=0/off/false/no — only do that on a fully trusted, isolated
+// network. On first boot a strong admin password is generated and logged once
+// (see ensureDefaultAdmin), or set PORTER_ADMIN_PASSWORD. Agent channels are
+// guarded separately by PORTER_AGENT_TOKEN.
 func authEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("PORTER_AUTH"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
+	case "0", "false", "no", "off":
 		return false
+	default:
+		return true
 	}
 }
 

@@ -72,7 +72,8 @@ func main() {
 
 - **Verified host keys** - TOFU by default (pins on first use, rejects changed keys as MITM); `SetHostKeyMode(HostKeyStrict)` and `TrustHostCA()` for step-ca host certificates. No more `InsecureIgnoreHostKey`.
 - **SSH certificate auth** - `ConnectWithCert()` for short-lived certs (step-ca / Vault SSH / Teleport); keepalives via `StartKeepalive()`; non-default `Config.Port`.
-- **Declarative state** - `EnsureFile/EnsureDir/EnsureSymlink/EnsurePackage/EnsureLine/EnsureServiceRunning/EnsureServiceEnabled` gather a fact, diff, and **no-op when already converged** (pyinfra-style). A real `SetDryRun(true)` previews exactly what would change.
+- **Bastion / ProxyJump** - `ConnectViaJump(target, jumps...)` tunnels through one or more bastions without exposing an SSH agent on intermediate hosts; host keys verified at every hop.
+- **Declarative state** - `EnsureFile/EnsureDir/EnsureSymlink/EnsurePackage/EnsureLine/EnsureServiceRunning/EnsureServiceEnabled/EnsureCron/EnsureUser/EnsureMode/EnsureOwner/EnsureAbsent/EnsureGitRepo` gather a fact, diff, and **no-op when already converged** (pyinfra-style; `EnsureCron`/`EnsureUser` fix the duplicate-append / non-idempotent gaps of `CronAdd`/`UserAdd`). A real `SetDryRun(true)` previews exactly what would change.
 - **Health assertions (Goss-style)** - `AssertServiceActive/AssertServiceEnabled/AssertProcessRunning/AssertPortListening/AssertFileExists/AssertFileContains/AssertPackageInstalled/AssertHTTPStatus/AssertCommandSucceeds` fail the deploy if reality doesn't match (post-deploy smoke test or pre-flight guard).
 - **Post-quantum SSH** - the underlying `x/crypto/ssh` negotiates `mlkem768x25519-sha256` (ML-KEM hybrid) by default when both ends support it (OpenSSH ≥ 10.0).
 - **Atomic releases & rollback** - `NewRelease(base).HealthCheck(cmd).Deploy(...)` deploys into a timestamped dir, health-checks, then flips `current` via an atomic `rename(2)`; `Rollback(base)` reverts in one step. (Kamal-style, but for plain systemd/VM targets.)
@@ -85,7 +86,7 @@ See [`examples/modern/main.go`](examples/modern/main.go) for an end-to-end deplo
 
 ### Web UI security
 
-The dashboard now enforces JWT auth when `PORTER_AUTH=1` (wiring previously didn't apply the middleware); WebSocket upgrades and SSE streams are origin-checked (`PORTER_ALLOWED_ORIGINS` for cross-origin frontends); machine-to-machine agent channels take an optional shared secret (`PORTER_AGENT_TOKEN`) so they can be locked down independently of human auth; stored credentials encrypt/decrypt **fail closed**; the default admin password is random (or `PORTER_ADMIN_PASSWORD`), logged once.
+The dashboard now enforces JWT auth **by default** (set `PORTER_AUTH=0` only on a fully trusted isolated network; the wiring previously didn't apply the middleware at all); WebSocket upgrades and SSE streams are origin-checked (`PORTER_ALLOWED_ORIGINS` for cross-origin frontends); machine-to-machine agent channels take an optional shared secret (`PORTER_AGENT_TOKEN`) so they can be locked down independently of human auth; stored credentials encrypt/decrypt **fail closed**; the default admin password is random (or `PORTER_ADMIN_PASSWORD`), logged once.
 
 ## DSL Reference
 

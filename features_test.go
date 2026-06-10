@@ -37,6 +37,41 @@ func TestEnsureBuilders(t *testing.T) {
 	}
 }
 
+func TestEnsureExtendedBuilders(t *testing.T) {
+	cases := []struct {
+		b      TaskBuilder
+		action string
+	}{
+		{EnsureCron("0 * * * *", "/usr/bin/backup.sh"), "ensure_cron"},
+		{EnsureUser("deploy"), "ensure_user"},
+		{EnsureMode("/etc/app.conf", "0640"), "ensure_mode"},
+		{EnsureOwner("/etc/app.conf", "app:app"), "ensure_owner"},
+		{EnsureAbsent("/tmp/stale"), "ensure_absent"},
+		{EnsureGitRepo("https://example.com/r.git", "/opt/r"), "ensure_git_repo"},
+	}
+	for _, c := range cases {
+		if got := c.b.Build().Action; got != c.action {
+			t.Errorf("action = %q, want %q", got, c.action)
+		}
+		// All are mutating (not read-only) — they change state when not converged.
+		if readOnlyActions[c.action] {
+			t.Errorf("%q should be mutating", c.action)
+		}
+	}
+	if b := EnsureCron("0 0 * * *", "/x.sh").Build(); b.Body != "0 0 * * * /x.sh" {
+		t.Errorf("EnsureCron body = %q", b.Body)
+	}
+	if b := EnsureMode("/f", "0600").Build(); b.Perm != "0600" || b.Dest != "/f" {
+		t.Errorf("EnsureMode fields: %+v", b)
+	}
+	if b := EnsureOwner("/f", "u:g").Build(); b.Own != "u:g" {
+		t.Errorf("EnsureOwner owner: %+v", b)
+	}
+	if b := EnsureGitRepo("url", "/d").Build(); b.Src != "url" || b.Dest != "/d" {
+		t.Errorf("EnsureGitRepo fields: %+v", b)
+	}
+}
+
 func TestSha256HexMatchesSha256sum(t *testing.T) {
 	// echo -n "hello" | sha256sum
 	const want = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"

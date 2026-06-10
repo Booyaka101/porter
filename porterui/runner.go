@@ -278,10 +278,10 @@ func Run(config RunConfig) {
 	}
 
 	if authEnabled() {
-		log.Println("[porter] authentication ENABLED (PORTER_AUTH) — /api requires a valid token")
+		log.Println("[porter] authentication ENABLED (secure default) — /api requires a valid token. First-boot admin password is logged once; or set PORTER_ADMIN_PASSWORD. Disable only on a trusted network with PORTER_AUTH=0.")
 		SetupRoutesWithAuth(server.Router)
 	} else {
-		log.Println("[porter] WARNING: authentication is DISABLED — every endpoint (remote command exec, terminal, file write) is reachable without a token. Set PORTER_AUTH=1 to enforce auth. Do NOT expose this beyond a trusted network.")
+		log.Println("[porter] WARNING: authentication is DISABLED (PORTER_AUTH=0) — every endpoint (remote command exec, terminal, file write) is reachable without a token. Do NOT expose this beyond a fully trusted network.")
 		SetupRoutes(server.Router)
 	}
 

@@ -3,7 +3,9 @@ package porterui
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -274,8 +276,14 @@ func executeManifestOnMachine(exec *ManifestExecution, manifest *Manifest, machi
 		vars.Set(k, v)
 	}
 
-	// Execute
+	// Execute, recording the deploy as an OpenTelemetry-shaped trace (one span
+	// per task) under the data dir, plus structured logs.
 	executor := porter.NewExecutor(client, machine.Password)
+	if tracer, closeTrace := newDeployTracer(manifest.Name, machine.Name); tracer != nil {
+		executor.SetTracer(tracer)
+		defer closeTrace()
+	}
+	executor.SetLogger(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	stats, err := executor.Run(manifest.Name, tasks, vars)
 
 	now := time.Now()

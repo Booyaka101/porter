@@ -3,6 +3,7 @@ package porter
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 )
 
 // sha256Hex returns the hex-encoded SHA-256 of s, matching the output format
@@ -65,6 +66,45 @@ func EnsureServiceEnabled(name string) TaskBuilder {
 	return TaskBuilder{t: Task{Action: "ensure_service_enabled", Dest: name}}
 }
 
+// EnsureCron ensures a crontab line (schedule + command) is present exactly
+// once. Unlike CronAdd (which appends every run, duplicating the line), this
+// is idempotent: no-op when the line already exists, and the value is escaped.
+func EnsureCron(schedule, command string) TaskBuilder {
+	return TaskBuilder{t: Task{Action: "ensure_cron", Body: schedule + " " + command, Name: "ensure cron: " + command}}
+}
+
+// EnsureUser ensures a user account exists (created if absent; no-op if it
+// already exists — unlike UserAdd, which errors on a second run). Chain
+// .Groups()/.Shell()/.Home() to set properties at creation.
+func EnsureUser(username string) TaskBuilder {
+	return TaskBuilder{t: Task{Action: "ensure_user", Dest: username, Name: "ensure user: " + username}}
+}
+
+// EnsureMode ensures path has exactly the given octal mode (e.g. "0640").
+// No-op when already correct. Use .Sudo() for root-owned paths.
+func EnsureMode(path, mode string) TaskBuilder {
+	return TaskBuilder{t: Task{Action: "ensure_mode", Dest: path, Perm: mode, Name: "ensure mode " + mode + ": " + path}}
+}
+
+// EnsureOwner ensures path is owned by owner ("user" or "user:group").
+// No-op when already correct. Use .Sudo() for root-owned paths.
+func EnsureOwner(path, owner string) TaskBuilder {
+	return TaskBuilder{t: Task{Action: "ensure_owner", Dest: path, Own: owner, Name: "ensure owner " + owner + ": " + path}}
+}
+
+// EnsureAbsent ensures path does NOT exist (removed if present; no-op if
+// already gone). Use .Sudo() for root-owned paths.
+func EnsureAbsent(path string) TaskBuilder {
+	return TaskBuilder{t: Task{Action: "ensure_absent", Dest: path, Name: "ensure absent: " + path}}
+}
+
+// EnsureGitRepo ensures dest is a checkout of url's upstream HEAD: cloned if
+// absent, fast-forwarded (hard reset to upstream) if behind, no-op if already
+// at upstream. A declarative "deploy from git".
+func EnsureGitRepo(url, dest string) TaskBuilder {
+	return TaskBuilder{t: Task{Action: "ensure_git_repo", Src: url, Dest: dest, Name: "ensure git repo: " + dest}}
+}
+
 // =============================================================================
 // FACT PREDICATES — shared by dispatch (to no-op) and dry-run (to preview).
 // Each returns true when the remote is ALREADY in the desired state.
@@ -120,6 +160,55 @@ func (e *Executor) serviceEnabled(name string, user bool) bool {
 func (e *Executor) pathExists(p string) bool {
 	_, err := e.client.Run("test -e " + p)
 	return err == nil
+}
+
+// modeMatches reports whether path's octal mode already equals want (e.g.
+// "0640"). Compared numerically so "640" and "0640" are equivalent.
+func (e *Executor) modeMatches(path, want string, sudo bool) bool {
+	got, err := e.runCaptureMaybeSudo(sudo, "stat -c '%a' "+shellEscape(path)+" 2>/dev/null")
+	if err != nil {
+		return false
+	}
+	return parseFileMode(got, 0) == parseFileMode(want, 1) // distinct defaults => unequal on parse failure
+}
+
+// ownerMatches reports whether path is already owned by want ("user" or
+// "user:group"). When want has no group, only the user is compared.
+func (e *Executor) ownerMatches(path, want string, sudo bool) bool {
+	format := "%U:%G"
+	if !strings.Contains(want, ":") {
+		format = "%U"
+	}
+	got, err := e.runCaptureMaybeSudo(sudo, "stat -c '"+format+"' "+shellEscape(path)+" 2>/dev/null")
+	if err != nil {
+		return false
+	}
+	return got == want
+}
+
+// ensureGitRepo clones url into dest if absent, hard-resets to upstream HEAD if
+// behind, and no-ops if already at upstream.
+func (e *Executor) ensureGitRepo(url, dest string) error {
+	if _, err := e.runCapture("test -d " + shellEscape(dest+"/.git")); err != nil {
+		// Not a repo yet -> clone.
+		return e.run("git clone " + shellEscape(url) + " " + shellEscape(dest))
+	}
+	g := "git -C " + shellEscape(dest) + " "
+	if err := e.run(g + "fetch --quiet"); err != nil {
+		return err
+	}
+	local, _ := e.runCapture(g + "rev-parse HEAD")
+	upstream, err := e.runCapture(g + "rev-parse '@{u}'")
+	if err != nil {
+		// No upstream tracking ref; nothing to converge against.
+		e.noOp = true
+		return nil
+	}
+	if local == upstream {
+		e.noOp = true
+		return nil
+	}
+	return e.run(g + "reset --hard '@{u}'")
 }
 
 // preview reports, WITHOUT mutating the remote, whether a task would change
@@ -182,6 +271,36 @@ func (e *Executor) preview(t Task, vars *Vars) (bool, string) {
 			return false, "ensure_service_enabled: " + dest + " enabled"
 		}
 		return true, "ensure_service_enabled: would enable " + dest
+	case "ensure_cron":
+		if _, err := e.runCapture("crontab -l 2>/dev/null | grep -qxF -- " + shellEscape(body)); err == nil {
+			return false, "ensure_cron: entry present"
+		}
+		return true, "ensure_cron: would add entry"
+	case "ensure_user":
+		if _, err := e.runCapture("id " + shellEscape(dest) + " >/dev/null 2>&1"); err == nil {
+			return false, "ensure_user: " + dest + " exists"
+		}
+		return true, "ensure_user: would create " + dest
+	case "ensure_mode":
+		if e.modeMatches(dest, t.Perm, t.Sudo) {
+			return false, "ensure_mode: " + dest + " already " + t.Perm
+		}
+		return true, "ensure_mode: would chmod " + dest + " -> " + t.Perm
+	case "ensure_owner":
+		if e.ownerMatches(dest, t.Own, t.Sudo) {
+			return false, "ensure_owner: " + dest + " already " + t.Own
+		}
+		return true, "ensure_owner: would chown " + dest + " -> " + t.Own
+	case "ensure_absent":
+		if !e.pathExists(dest) {
+			return false, "ensure_absent: " + dest + " already gone"
+		}
+		return true, "ensure_absent: would remove " + dest
+	case "ensure_git_repo":
+		if _, err := e.runCapture("test -d " + shellEscape(dest+"/.git")); err != nil {
+			return true, "ensure_git_repo: would clone " + src + " -> " + dest
+		}
+		return true, "ensure_git_repo: would fetch/update " + dest
 	}
 
 	if readOnlyActions[t.Action] {
