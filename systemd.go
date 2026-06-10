@@ -189,7 +189,7 @@ func appendJournalFlag(current, flag string) string {
 
 // shellEscape escapes a string for safe use in shell commands.
 func shellEscape(s string) string {
-	return "'" + strings.Replace(s, "'", "'\\''", -1) + "'"
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // =============================================================================

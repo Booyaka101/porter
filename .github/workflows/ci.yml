@@ -58,7 +58,8 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # Build golangci-lint from source with this job's Go toolchain so it can
+      # never be "built with an older Go than the target" (the prebuilt binaries
+      # / the action lag new Go releases). Pinned for reproducibility.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...

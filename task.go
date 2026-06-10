@@ -1,8 +1,9 @@
 package porter
 
-import "strings"
-
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Task represents a single deployment action.
 type Task struct {

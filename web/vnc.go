@@ -99,10 +99,9 @@ func EnsureVNCReady(machine *Machine, display string) error {
 	}
 
 	// Fallback: start x11vnc manually
-	vncPort := 5900
 	var displayNum int
 	fmt.Sscanf(display, ":%d", &displayNum)
-	vncPort = 5900 + displayNum
+	vncPort := 5900 + displayNum
 
 	// Kill any existing instance first
 	ExecuteSSHCommandOnMachine(machine, "pkill -9 x11vnc 2>/dev/null")
@@ -117,9 +116,8 @@ func EnsureVNCReady(machine *Machine, display string) error {
 			if tryDisplay == display {
 				continue
 			}
-			tryPort := 5900
 			fmt.Sscanf(tryDisplay, ":%d", &displayNum)
-			tryPort = 5900 + displayNum
+			tryPort := 5900 + displayNum
 
 			altCmd := fmt.Sprintf("x11vnc -display %s -forever -shared -nopw -rfbport %d -bg -o /tmp/x11vnc.log -xkb 2>&1", tryDisplay, tryPort)
 			_, altErr := ExecuteSSHCommandOnMachine(machine, altCmd)
@@ -166,10 +164,9 @@ func StartVNCServer(machine *Machine, display string) (*VNCSession, error) {
 	}
 
 	// Determine VNC port
-	vncPort := 5900
 	var displayNum int
 	fmt.Sscanf(display, ":%d", &displayNum)
-	vncPort = 5900 + displayNum
+	vncPort := 5900 + displayNum
 
 	// Give x11vnc a moment to fully start
 	time.Sleep(500 * time.Millisecond)
