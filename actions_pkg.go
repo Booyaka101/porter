@@ -32,15 +32,15 @@ func actAptUpdate(e *Executor, t Task, src, dest, body, perm, own string, vars *
 }
 
 func actAptInstall(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.runSudo("apt-get install -y " + body)
+	return e.runSudo("DEBIAN_FRONTEND=noninteractive apt-get install -y " + body)
 }
 
 func actAptRemove(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.runSudo("apt-get remove -y " + body)
+	return e.runSudo("DEBIAN_FRONTEND=noninteractive apt-get remove -y " + body)
 }
 
 func actAptUpgrade(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.runSudo("apt-get upgrade -y")
+	return e.runSudo("DEBIAN_FRONTEND=noninteractive apt-get upgrade -y")
 }
 
 func actUserAdd(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {

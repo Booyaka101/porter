@@ -2,6 +2,7 @@ package porter
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -85,7 +86,8 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 	exitCode := 0
 	err = session.Wait()
 	if err != nil {
-		if exitErr, ok := err.(*ssh.ExitError); ok {
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitStatus()
 			err = nil // Not a real error, just non-zero exit
 		}

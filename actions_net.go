@@ -17,7 +17,7 @@ func init() {
 }
 
 func actCurl(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.run("curl -fsSL -o " + dest + " " + src)
+	return e.run("curl --proto-redir =https --tlsv1.2 -fsSL -o " + dest + " " + src)
 }
 
 func actWget(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {

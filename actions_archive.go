@@ -10,19 +10,19 @@ func init() {
 }
 
 func actTarCreate(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.runSudo("tar -cvf " + dest + " -C $(dirname " + src + ") $(basename " + src + ")")
+	return e.runSudo("tar -cf " + dest + " -C $(dirname " + src + ") $(basename " + src + ")")
 }
 
 func actTarExtract(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.runSudo("tar -xvf " + src + " -C " + dest)
+	return e.runSudo("tar -xf " + src + " -C " + dest)
 }
 
 func actTarGzCreate(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.runSudo("tar -czvf " + dest + " -C $(dirname " + src + ") $(basename " + src + ")")
+	return e.runSudo("tar -czf " + dest + " -C $(dirname " + src + ") $(basename " + src + ")")
 }
 
 func actTarGzExtract(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.runSudo("tar -xzvf " + src + " -C " + dest)
+	return e.runSudo("tar -xzf " + src + " -C " + dest)
 }
 
 func actZipCreate(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {

@@ -1,11 +1,12 @@
 package web
 
 import (
+	"errors"
 	"fmt"
-	"github.com/booyaka101/porter"
 	"os/exec"
 	"time"
 
+	"github.com/booyaka101/porter"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -101,7 +102,8 @@ func (c *SSHClient) ExecuteCommand(cmd string) (string, int, error) {
 	output, err := session.CombinedOutput(cmd)
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*ssh.ExitError); ok {
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitStatus()
 			return string(output), exitCode, nil
 		}
