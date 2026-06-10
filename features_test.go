@@ -292,3 +292,38 @@ func TestDockerRunOptionBuilders(t *testing.T) {
 		}
 	}
 }
+
+func TestTrustCAContentBuilder(t *testing.T) {
+	b := TrustCAContent("-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----").As("idx-root-ca").Build()
+	if b.Action != "trust_ca_content" {
+		t.Fatalf("action = %q", b.Action)
+	}
+	if b.Src != "idx-root-ca" {
+		t.Errorf("anchor (Src) = %q, want idx-root-ca", b.Src)
+	}
+	if !strings.Contains(b.Body, "BEGIN CERTIFICATE") {
+		t.Errorf("PEM not in Body: %q", b.Body)
+	}
+	if readOnlyActions["trust_ca_content"] {
+		t.Error("trust_ca_content should be mutating")
+	}
+}
+
+func TestExecTrustCAContent(t *testing.T) {
+	fr := &fakeRunner{rules: []rule{{contains: "mktemp", out: "/tmp/porter.XXXX"}}}
+	e := newTestExec(fr)
+	_, err := e.exec(TrustCAContent("PEMDATA").As("idx-root-ca").Build(), NewVars())
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	// Must install the anchor under the trust dir (0644) and refresh the store.
+	if !fr.ran("/usr/local/share/ca-certificates/idx-root-ca.crt") {
+		t.Errorf("did not install anchor into trust dir; calls=%v", fr.calls)
+	}
+	if !fr.ran("install -m 0644") {
+		t.Errorf("anchor not written 0644; calls=%v", fr.calls)
+	}
+	if !fr.ran("update-ca-certificates") {
+		t.Errorf("did not refresh trust store; calls=%v", fr.calls)
+	}
+}

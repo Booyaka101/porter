@@ -373,6 +373,25 @@ func (e *Executor) trustCA(certPath, anchor string) error {
 	return e.runSudo("update-ca-certificates")
 }
 
+// trustCAContent installs an in-memory PEM CA into the OS trust store: it
+// writes the PEM straight into /usr/local/share/ca-certificates/<anchor>.crt
+// (atomically, mode 0644, via sudo) and runs update-ca-certificates. Unlike
+// trustCA the cert need not already be on the remote. anchor defaults to
+// "custom-ca"; a .crt suffix is ensured.
+func (e *Executor) trustCAContent(anchor, pem string) error {
+	if anchor == "" {
+		anchor = "custom-ca"
+	}
+	if !strings.HasSuffix(anchor, ".crt") {
+		anchor += ".crt"
+	}
+	target := "/usr/local/share/ca-certificates/" + anchor
+	if err := e.writeFile(target, pem, true, "0644", ""); err != nil {
+		return err
+	}
+	return e.runSudo("update-ca-certificates")
+}
+
 // splitOwner splits a "user:group" owner spec. hasGroup is false when only a
 // user is given (no colon, or an empty group).
 func splitOwner(owner string) (user, group string, hasGroup bool) {
