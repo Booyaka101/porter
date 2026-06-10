@@ -438,26 +438,6 @@ func (s *Scheduler) updateJobStatusWithError(jobID, status, errorMsg string) {
 	}
 }
 
-func (s *Scheduler) updateJobStatus(jobID, status, errorMsg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if job, exists := s.jobs[jobID]; exists {
-		job.LastRun = time.Now()
-		job.LastStatus = status
-		job.RunCount++
-
-		// Update next run time
-		if entryID, exists := s.entryIDs[jobID]; exists {
-			entry := s.cron.Entry(entryID)
-			job.NextRun = entry.Next
-		}
-
-		s.save()
-	}
-}
-
-// AddJob adds a new scheduled job
 func (s *Scheduler) AddJob(job *ScheduledJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

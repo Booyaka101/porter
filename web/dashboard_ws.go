@@ -19,10 +19,8 @@ type DashboardUpdate struct {
 
 // DashboardClient represents a connected WebSocket client
 type DashboardClient struct {
-	conn   *websocket.Conn
-	send   chan []byte
-	closed bool
-	mu     sync.Mutex
+	conn *websocket.Conn
+	send chan []byte
 }
 
 // DashboardHub manages WebSocket connections for dashboard updates

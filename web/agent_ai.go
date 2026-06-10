@@ -622,10 +622,7 @@ func needsMachineContext(message string) bool {
 			return true
 		}
 	}
-	if ipRegex.MatchString(msg) {
-		return true
-	}
-	return false
+	return ipRegex.MatchString(msg)
 }
 
 // ---------- Tier 1: Server-side response builders ----------
@@ -1612,7 +1609,7 @@ func callOllamaWithTools(ctx context.Context, config *AIAgentConfig, messages []
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return "", nil, 0, fmt.Errorf("Ollama API error: %s", string(body))
+		return "", nil, 0, fmt.Errorf("ollama API error: %s", string(body))
 	}
 
 	var result struct {
@@ -1627,162 +1624,6 @@ func callOllamaWithTools(ctx context.Context, config *AIAgentConfig, messages []
 	}
 
 	return result.Message.Content, result.Message.ToolCalls, 0, nil
-}
-
-// callOpenAI calls the OpenAI API (kept for compatibility but blocked by security policy)
-func callOpenAI(ctx context.Context, config *AIAgentConfig, messages []ChatMessage, apiKey string) (string, int, error) {
-	model := config.Model
-	if model == "" {
-		model = "gpt-4"
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == 0 {
-		maxTokens = 2048
-	}
-
-	temperature := config.Temperature
-	if temperature == 0 {
-		temperature = 0.7
-	}
-
-	openaiMessages := make([]map[string]string, len(messages))
-	for i, msg := range messages {
-		openaiMessages[i] = map[string]string{
-			"role":    msg.Role,
-			"content": msg.Content,
-		}
-	}
-
-	reqBody := map[string]interface{}{
-		"model":       model,
-		"messages":    openaiMessages,
-		"max_tokens":  maxTokens,
-		"temperature": temperature,
-	}
-
-	jsonBody, _ := json.Marshal(reqBody)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", 0, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		return "", 0, fmt.Errorf("OpenAI API error: %s", string(body))
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			TotalTokens int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", 0, err
-	}
-
-	if len(result.Choices) == 0 {
-		return "", 0, fmt.Errorf("no response from OpenAI")
-	}
-
-	return result.Choices[0].Message.Content, result.Usage.TotalTokens, nil
-}
-
-func callAnthropic(ctx context.Context, config *AIAgentConfig, messages []ChatMessage, apiKey string) (string, int, error) {
-	model := config.Model
-	if model == "" {
-		model = "claude-3-sonnet-20240229"
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == 0 {
-		maxTokens = 2048
-	}
-
-	var systemPrompt string
-	anthropicMessages := []map[string]string{}
-
-	for _, msg := range messages {
-		if msg.Role == "system" {
-			systemPrompt = msg.Content
-		} else {
-			anthropicMessages = append(anthropicMessages, map[string]string{
-				"role":    msg.Role,
-				"content": msg.Content,
-			})
-		}
-	}
-
-	reqBody := map[string]interface{}{
-		"model":      model,
-		"max_tokens": maxTokens,
-		"messages":   anthropicMessages,
-	}
-	if systemPrompt != "" {
-		reqBody["system"] = systemPrompt
-	}
-
-	jsonBody, _ := json.Marshal(reqBody)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", 0, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		return "", 0, fmt.Errorf("Anthropic API error: %s", string(body))
-	}
-
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", 0, err
-	}
-
-	if len(result.Content) == 0 {
-		return "", 0, fmt.Errorf("no response from Anthropic")
-	}
-
-	return result.Content[0].Text, result.Usage.InputTokens + result.Usage.OutputTokens, nil
 }
 
 // ---------- Response sanitization ----------
@@ -2293,9 +2134,7 @@ func handleAIChat(w http.ResponseWriter, req *http.Request) {
 	if len(historyToAdd) > 6 {
 		historyToAdd = historyToAdd[len(historyToAdd)-6:]
 	}
-	for _, msg := range historyToAdd {
-		messages = append(messages, msg)
-	}
+	messages = append(messages, historyToAdd...)
 
 	enrichedMessage := chatReq.Message
 	if ips := ipRegex.FindAllString(chatReq.Message, -1); len(ips) > 0 {
@@ -2380,9 +2219,7 @@ func callLLMFallback(ctx context.Context, config *AIAgentConfig, machines []*Mac
 	fallbackMessages := make([]ChatMessage, 0, len(messages))
 	fallbackPrompt := buildFallbackSystemPrompt(config, machines, liveContext)
 	fallbackMessages = append(fallbackMessages, ChatMessage{Role: "system", Content: fallbackPrompt})
-	for _, m := range messages[1:] {
-		fallbackMessages = append(fallbackMessages, m)
-	}
+	fallbackMessages = append(fallbackMessages, messages[1:]...)
 	return callLLM(ctx, config, fallbackMessages)
 }
 
