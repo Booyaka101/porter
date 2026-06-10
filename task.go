@@ -6,25 +6,26 @@ import "time"
 
 // Task represents a single deployment action.
 type Task struct {
-	Name     string        // Display name for the task
-	Action   string        // Action type (e.g., "upload", "run", "service")
-	Src      string        // Source path or value
-	Dest     string        // Destination path or target
-	Body     string        // Command body or content
-	State    string        // State for services/containers (start, stop, etc.)
-	User     bool          // Use user-level systemd
-	Sudo     bool          // Run with sudo
-	Rec      bool          // Recursive flag
-	Perm     string        // File mode (chmod, write) e.g. "0600"
-	Own      string        // Owner spec (chown, write) e.g. "idx:idx"
-	When     When          // Condition for execution
-	Loop     []string      // Items to loop over
-	Ignore   bool          // Ignore errors
-	Retry    int           // Retry count on failure
-	Delay    time.Duration // Delay between retries
-	Timeout  time.Duration // Timeout for wait operations
-	Register string        // Variable name to store output
-	Creates  string        // Skip if this path exists
+	Name      string        // Display name for the task
+	Action    string        // Action type (e.g., "upload", "run", "service")
+	Src       string        // Source path or value
+	Dest      string        // Destination path or target
+	Body      string        // Command body or content
+	State     string        // State for services/containers (start, stop, etc.)
+	User      bool          // Use user-level systemd
+	Sudo      bool          // Run with sudo
+	Rec       bool          // Recursive flag
+	Perm      string        // File mode (chmod, write) e.g. "0600"
+	Own       string        // Owner spec (chown, write) e.g. "idx:idx"
+	When      When          // Condition for execution
+	Loop      []string      // Items to loop over
+	Ignore    bool          // Ignore errors
+	Retry     int           // Retry count on failure
+	Delay     time.Duration // Delay between retries
+	Timeout   time.Duration // Timeout for wait operations
+	Register  string        // Variable name to store output
+	Creates   string        // Skip if this path exists
+	StdinFile string        // Local file streamed into the command's stdin (Run)
 }
 
 // Stats holds execution statistics.
@@ -85,7 +86,7 @@ func (p TaskProgress) ProgressBar(width int) string {
 	pct := float64(p.Index+1) / float64(p.Total)
 	filled := min(int(pct*float64(width)), width)
 	var bar strings.Builder
-	for i := 0; i < filled; i++ {
+	for range filled {
 		bar.WriteString("█")
 	}
 	for i := filled; i < width; i++ {

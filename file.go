@@ -4,7 +4,12 @@ package porter
 // FILE OPERATIONS
 // =============================================================================
 
-// Upload transfers a local file to the remote server.
+// Upload streams the LOCAL file at src to dest on the target via SFTP. Unlike
+// Write (a text heredoc) and Install (a remote-to-remote cp), Upload moves a
+// file from the control machine — suitable for binaries and large payloads
+// (image tars, keys). Honors .Sudo(), .Mode(), and .Owner() for final
+// placement (staged via a private 0600 temp when any of those is set, so a
+// secret never sits world-readable).
 func Upload(src, dest string) TaskBuilder {
 	return TaskBuilder{Task{Action: "upload", Src: src, Dest: dest, Name: "Upload " + src}}
 }

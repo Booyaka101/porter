@@ -19,7 +19,7 @@ func init() {
 }
 
 func actUpload(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
-	return e.client.Upload(src, dest)
+	return e.uploadFile(src, dest, t.Sudo, perm, own)
 }
 
 func actCopy(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {

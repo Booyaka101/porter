@@ -3,6 +3,7 @@ package porter
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 )
@@ -325,5 +326,75 @@ func TestExecTrustCAContent(t *testing.T) {
 	}
 	if !fr.ran("update-ca-certificates") {
 		t.Errorf("did not refresh trust store; calls=%v", fr.calls)
+	}
+}
+
+func TestUploadBuilder(t *testing.T) {
+	b := Upload("build/app.tar", "/tmp/app.tar").Mode("0600").Owner("app:app").Sudo().Build()
+	if b.Action != "upload" || b.Src != "build/app.tar" || b.Dest != "/tmp/app.tar" {
+		t.Fatalf("Upload builder: %+v", b)
+	}
+	if b.Perm != "0600" || b.Own != "app:app" || !b.Sudo {
+		t.Errorf("Upload modifiers: perm=%q own=%q sudo=%v", b.Perm, b.Own, b.Sudo)
+	}
+	if readOnlyActions["upload"] {
+		t.Error("upload should be mutating")
+	}
+}
+
+func TestStdinFileBuilder(t *testing.T) {
+	b := Run("docker load").StdinFile("build/app.tar").Sudo().Build()
+	if b.Action != "run" || b.Body != "docker load" {
+		t.Fatalf("Run builder: %+v", b)
+	}
+	if b.StdinFile != "build/app.tar" || !b.Sudo {
+		t.Errorf("StdinFile/Sudo: stdin=%q sudo=%v", b.StdinFile, b.Sudo)
+	}
+}
+
+func TestPlaceStaged(t *testing.T) {
+	// mode + owner under sudo -> single atomic install
+	fr := &fakeRunner{}
+	if err := newTestExec(fr).placeStaged("/tmp/t", "/usr/bin/app", true, "0755", "root:root"); err != nil {
+		t.Fatal(err)
+	}
+	if !fr.ran("install -m 0755 -o root -g root /tmp/t /usr/bin/app") {
+		t.Errorf("expected install with mode+owner; calls=%v", fr.calls)
+	}
+	if !fr.ran("sudo -S") {
+		t.Errorf("placement should run under sudo; calls=%v", fr.calls)
+	}
+	// owner only, no sudo -> cp then chown
+	fr2 := &fakeRunner{}
+	if err := newTestExec(fr2).placeStaged("/tmp/t", "/srv/d", false, "", "u:g"); err != nil {
+		t.Fatal(err)
+	}
+	if !fr2.ran("cp /tmp/t /srv/d") || !fr2.ran("chown u:g /srv/d") {
+		t.Errorf("expected cp+chown; calls=%v", fr2.calls)
+	}
+}
+
+func TestSudoStdinCommand(t *testing.T) {
+	const pw, payload = "pw123", "TARBYTES"
+
+	// With sudo: command is wrapped and the password is the FIRST stdin line,
+	// with the file bytes intact AFTER it (sudo must not consume them).
+	cmd, r := sudoStdinCommand("docker load", pw, true, strings.NewReader(payload))
+	if cmd != "sudo -k -S -p '' docker load" {
+		t.Errorf("sudo cmd = %q", cmd)
+	}
+	got, _ := io.ReadAll(r)
+	if string(got) != pw+"\n"+payload {
+		t.Errorf("sudo stdin = %q, want password line then file bytes", got)
+	}
+
+	// Without sudo: command unchanged and stdin is exactly the file.
+	cmd, r = sudoStdinCommand("docker load", pw, false, strings.NewReader(payload))
+	if cmd != "docker load" {
+		t.Errorf("nosudo cmd = %q", cmd)
+	}
+	got, _ = io.ReadAll(r)
+	if string(got) != payload {
+		t.Errorf("nosudo stdin = %q, want just file bytes", got)
 	}
 }

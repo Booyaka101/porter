@@ -40,6 +40,11 @@ func (b TaskBuilder) Ignore() TaskBuilder { b.t.Ignore = true; return b }
 // Creates skips the task if the specified path already exists.
 func (b TaskBuilder) Creates(path string) TaskBuilder { b.t.Creates = path; return b }
 
+// StdinFile streams the LOCAL file at path into this command's stdin on the
+// remote host — e.g. Run("docker load").StdinFile("app.tar").Sudo() pipes the
+// local tar into `docker load` without ever writing it to the target's disk.
+func (b TaskBuilder) StdinFile(path string) TaskBuilder { b.t.StdinFile = path; return b }
+
 // =============================================================================
 // PRIVILEGE ESCALATION
 // =============================================================================
