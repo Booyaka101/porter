@@ -39,3 +39,17 @@ func checkWSOrigin(r *http.Request) bool {
 	}
 	return false
 }
+
+// allowSSEOrigin sets a precise, same-origin-or-allowlisted CORS header for a
+// Server-Sent-Events endpoint instead of the wildcard "*". With "*", any
+// cross-origin page could read the stream (logs, command output) riding the
+// user's porter_token cookie. A same-origin request needs no header at all, so
+// when the origin isn't trusted we set nothing and the browser blocks the
+// cross-origin read.
+func allowSSEOrigin(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin != "" && checkWSOrigin(r) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Add("Vary", "Origin")
+	}
+}

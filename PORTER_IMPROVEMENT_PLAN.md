@@ -136,4 +136,15 @@ All in the `porter` package, tested (`features_test.go`, 71 tests green total):
 
 **New public API:** `SetHostKeyMode`, `SetKnownHostsPath`, `TrustHostCA`, `HostKeyCallback`, `ConnectWithCert`, `StartKeepalive`, `Config.Port`, `Ensure*`, `NewRelease`/`Rollback`, `NewTracer`, `Executor.SetTracer`/`SetLogger`, `Secret`, `VerifyBlob`/`VerifyImage`. Worked example: `examples/modern/main.go`.
 
-**Remaining (low-risk follow-ups):** flip `PORTER_AUTH` default on (after agent-channel auth); SSE `Access-Control-Allow-Origin:*` tightening; `UploadDir`/`DownloadDir` local-tar path quoting; optional Vault/OpenBao/Infisical secret backends; wire `Tracer`/`SetLogger` into the `porterui` deploy path.
+## 8. Second autonomous pass (2026-06-10) — remaining follow-ups closed
+
+- ✅ **SSE CORS** — `logs.go`/`streaming.go` wildcard `Access-Control-Allow-Origin:*` → `allowSSEOrigin` (same-origin or `PORTER_ALLOWED_ORIGINS`).
+- ✅ **`UploadDir`/`DownloadDir` hardening** (`connection.go`) — all paths shell-quoted; remote temp names now unpredictable (`randomID`) instead of `time.Now().UnixNano()` (no `/tmp` race/symlink attack).
+- ✅ **Goss-style health assertions** (`assert.go`) — 9 `Assert*` primitives; read-only, fail-closed gates.
+- ✅ **Pluggable secret backends** — `SecretCommand(fetchCmd, dest)` (`secrets.go`) for Vault/OpenBao/1Password/Infisical via their CLIs; same 0600/never-logged guarantees as `Secret`.
+- ✅ **Agent-channel shared-secret auth** — `PORTER_AGENT_TOKEN` (`auth.go`): agent/standalone-agent/build-client channels require the token when set (constant-time compare, header or query), open when unset. Lets `PORTER_AUTH` be enabled for humans while locking machine channels independently.
+- ✅ **Post-quantum SSH confirmed** — `x/crypto v0.47` already lists `mlkem768x25519-sha256` in the default kex order; porter negotiates ML-KEM hybrid automatically. No code change needed.
+
+Tests added: `assert`/`SecretCommand` builders + read-only classification (`features_test.go`); `agentTokenValid` + agent-channel gate (`porterui/security_test.go`, `auth_middleware_test.go`). **Total 90+ assertions, all green.**
+
+**Still open (genuinely optional / needs product decision):** flip `PORTER_AUTH` default on (deployment policy — would change the running trusted-LAN box's behavior); wire `Tracer`/`SetLogger` into the `porterui` deploy path (needs a UI trace viewer to be meaningful); SSH host-CA full `CertChecker` user-cert *rotation* tooling (porter consumes certs; issuing them is step-ca's job).

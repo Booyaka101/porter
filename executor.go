@@ -451,6 +451,10 @@ var readOnlyActions = map[string]bool{
 	"journal": true, "journal_unit": true, "git_describe": true,
 	"ping": true, "curl": true, "wget": true,
 	"verify_blob": true, "verify_image": true,
+	"assert_service_active": true, "assert_service_enabled": true,
+	"assert_process": true, "assert_port_listening": true,
+	"assert_file_exists": true, "assert_file_contains": true,
+	"assert_package": true, "assert_http_status": true, "assert_command": true,
 }
 
 // exec runs the action and reports whether it changed remote state. A
@@ -573,9 +577,63 @@ func (e *Executor) dispatch(t Task, vars *Vars) error {
 		sc, sudo := systemctlPrefix(t.User)
 		return e.runMaybeSudo(sudo, sc+"enable "+shellEscape(dest))
 
+	// Declarative health assertions (Goss-style; fail closed)
+	case "assert_service_active":
+		if !e.serviceActive(dest, t.User) {
+			return fmt.Errorf("assertion failed: service %s is not active", dest)
+		}
+		return nil
+	case "assert_service_enabled":
+		if !e.serviceEnabled(dest, t.User) {
+			return fmt.Errorf("assertion failed: service %s is not enabled", dest)
+		}
+		return nil
+	case "assert_process":
+		if _, err := e.runCapture("pgrep -f -- " + shellEscape(dest) + " >/dev/null"); err != nil {
+			return fmt.Errorf("assertion failed: no process matching %q", dest)
+		}
+		return nil
+	case "assert_port_listening":
+		if _, err := e.runCapture("ss -ltnH 2>/dev/null | grep -q " + shellEscape(":"+dest+"$\\|:"+dest+" ")); err != nil {
+			return fmt.Errorf("assertion failed: nothing listening on port %s", dest)
+		}
+		return nil
+	case "assert_file_exists":
+		if !e.pathExists(dest) {
+			return fmt.Errorf("assertion failed: %s does not exist", dest)
+		}
+		return nil
+	case "assert_file_contains":
+		if _, err := e.runCaptureMaybeSudo(t.Sudo, "grep -qF -- "+shellEscape(body)+" "+shellEscape(dest)); err != nil {
+			return fmt.Errorf("assertion failed: %s does not contain %q", dest, body)
+		}
+		return nil
+	case "assert_package":
+		if !e.packageInstalled(dest) {
+			return fmt.Errorf("assertion failed: package %s is not installed", dest)
+		}
+		return nil
+	case "assert_http_status":
+		got, _ := e.runCapture("curl -s -o /dev/null -w '%{http_code}' " + shellEscape(dest))
+		if got != body {
+			return fmt.Errorf("assertion failed: %s returned HTTP %s, want %s", dest, got, body)
+		}
+		return nil
+	case "assert_command":
+		if _, err := e.runCapture(body); err != nil {
+			return fmt.Errorf("assertion failed: command did not succeed: %s", body)
+		}
+		return nil
+
 	// Secrets & supply-chain verification
 	case "secret":
 		plain, err := decryptSops(src)
+		if err != nil {
+			return err
+		}
+		return e.sftpWriteSecret(dest, plain, perm, own, t.Sudo)
+	case "secret_command":
+		plain, err := fetchSecretCommand(body)
 		if err != nil {
 			return err
 		}

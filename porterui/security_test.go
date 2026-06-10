@@ -37,6 +37,43 @@ func TestCheckWSOrigin(t *testing.T) {
 	}
 }
 
+func TestAgentTokenValid(t *testing.T) {
+	// No token configured -> channels stay open.
+	t.Run("unset = open", func(t *testing.T) {
+		t.Setenv("PORTER_AGENT_TOKEN", "")
+		req := httptest.NewRequest("GET", "/api/agent/ws", nil)
+		if !agentTokenValid(req) {
+			t.Error("with no PORTER_AGENT_TOKEN, agent channel should be open")
+		}
+	})
+	t.Run("matching header", func(t *testing.T) {
+		t.Setenv("PORTER_AGENT_TOKEN", "s3cr3t")
+		req := httptest.NewRequest("GET", "/api/agent/ws", nil)
+		req.Header.Set("X-Porter-Agent-Token", "s3cr3t")
+		if !agentTokenValid(req) {
+			t.Error("matching header token should pass")
+		}
+	})
+	t.Run("matching query", func(t *testing.T) {
+		t.Setenv("PORTER_AGENT_TOKEN", "s3cr3t")
+		req := httptest.NewRequest("GET", "/api/agent/ws?agent_token=s3cr3t", nil)
+		if !agentTokenValid(req) {
+			t.Error("matching query token should pass")
+		}
+	})
+	t.Run("missing/wrong rejected", func(t *testing.T) {
+		t.Setenv("PORTER_AGENT_TOKEN", "s3cr3t")
+		req := httptest.NewRequest("GET", "/api/agent/ws", nil)
+		if agentTokenValid(req) {
+			t.Error("missing token must be rejected when configured")
+		}
+		req.Header.Set("X-Porter-Agent-Token", "wrong")
+		if agentTokenValid(req) {
+			t.Error("wrong token must be rejected")
+		}
+	})
+}
+
 func TestEncryptFailsClosedWithoutKey(t *testing.T) {
 	saved := encryptionKey
 	encryptionKey = nil

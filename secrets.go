@@ -42,6 +42,40 @@ func Secret(sopsFile, dest string) TaskBuilder {
 	}}
 }
 
+// SecretCommand fetches a secret by running fetchCmd locally and writing its
+// stdout to the remote dest at 0600 over SFTP (never logged, never in a remote
+// shell command). This is the pluggable backend escape hatch — works with any
+// secrets manager that has a CLI:
+//
+//	porter.SecretCommand("vault kv get -field=env secret/myapp", "/etc/myapp/env")
+//	porter.SecretCommand("bao kv get -field=env secret/myapp", "/etc/myapp/env")   // OpenBao
+//	porter.SecretCommand("op read op://vault/myapp/env", "/etc/myapp/env")          // 1Password
+//	porter.SecretCommand("infisical secrets get FOO --plain", "/etc/myapp/foo")
+//
+// Override the remote mode with .Mode() and ownership with .Owner().
+func SecretCommand(fetchCmd, dest string) TaskBuilder {
+	return TaskBuilder{t: Task{
+		Action: "secret_command",
+		Body:   fetchCmd,
+		Dest:   dest,
+		Perm:   "0600",
+		Name:   "fetch secret -> " + dest,
+	}}
+}
+
+// fetchSecretCommand runs cmd via the local shell and returns its stdout. On
+// failure it returns only stderr (never stdout, which may hold partial secret).
+func fetchSecretCommand(cmd string) ([]byte, error) {
+	c := exec.Command("sh", "-c", cmd)
+	var out, errBuf bytes.Buffer
+	c.Stdout = &out
+	c.Stderr = &errBuf
+	if err := c.Run(); err != nil {
+		return nil, fmt.Errorf("secret command failed: %v: %s", err, errBuf.String())
+	}
+	return out.Bytes(), nil
+}
+
 // decryptSops runs `sops -d <file>` and returns the plaintext. On failure it
 // returns only stderr (never stdout, which could contain partial plaintext).
 func decryptSops(file string) ([]byte, error) {

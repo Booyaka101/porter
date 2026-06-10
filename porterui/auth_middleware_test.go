@@ -48,6 +48,43 @@ func TestAuthMiddlewareEnforcesProtectedRoutes(t *testing.T) {
 	}
 }
 
+// TestAgentChannelTokenGate confirms agent channels are open without a
+// configured secret but require it once PORTER_AGENT_TOKEN is set.
+func TestAgentChannelTokenGate(t *testing.T) {
+	r := mux.NewRouter()
+	r.Use(AuthMiddleware)
+	r.HandleFunc("/api/agent/ws", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("open when unset", func(t *testing.T) {
+		t.Setenv("PORTER_AGENT_TOKEN", "")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest("GET", "/api/agent/ws", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unset token: got %d, want 200", rec.Code)
+		}
+	})
+	t.Run("rejected without token when set", func(t *testing.T) {
+		t.Setenv("PORTER_AGENT_TOKEN", "s3cr3t")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest("GET", "/api/agent/ws", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("missing agent token: got %d, want 401", rec.Code)
+		}
+	})
+	t.Run("accepted with token when set", func(t *testing.T) {
+		t.Setenv("PORTER_AGENT_TOKEN", "s3cr3t")
+		req := httptest.NewRequest("GET", "/api/agent/ws", nil)
+		req.Header.Set("X-Porter-Agent-Token", "s3cr3t")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("valid agent token: got %d, want 200", rec.Code)
+		}
+	})
+}
+
 // TestAuthMiddlewareAcceptsValidToken confirms a properly signed token passes.
 func TestAuthMiddlewareAcceptsValidToken(t *testing.T) {
 	r := mux.NewRouter()

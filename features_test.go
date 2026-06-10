@@ -176,6 +176,48 @@ func TestSecretAndVerifyBuilders(t *testing.T) {
 	}
 }
 
+func TestAssertBuilders(t *testing.T) {
+	cases := []struct {
+		b      TaskBuilder
+		action string
+	}{
+		{AssertServiceActive("nginx"), "assert_service_active"},
+		{AssertServiceEnabled("nginx"), "assert_service_enabled"},
+		{AssertProcessRunning("myapp"), "assert_process"},
+		{AssertPortListening("8080"), "assert_port_listening"},
+		{AssertFileExists("/etc/app.conf"), "assert_file_exists"},
+		{AssertFileContains("/etc/app.conf", "x=1"), "assert_file_contains"},
+		{AssertPackageInstalled("nginx"), "assert_package"},
+		{AssertHTTPStatus("http://localhost/health", "200"), "assert_http_status"},
+		{AssertCommandSucceeds("test -f /tmp/ok"), "assert_command"},
+	}
+	for _, c := range cases {
+		if got := c.b.Build().Action; got != c.action {
+			t.Errorf("action = %q, want %q", got, c.action)
+		}
+		// every assertion is read-only (never a "change")
+		if !readOnlyActions[c.action] {
+			t.Errorf("%q should be read-only", c.action)
+		}
+	}
+	if b := AssertFileContains("/f", "needle").Build(); b.Body != "needle" || b.Dest != "/f" {
+		t.Errorf("AssertFileContains fields: %+v", b)
+	}
+	if b := AssertHTTPStatus("http://x/h", "204").Build(); b.Body != "204" {
+		t.Errorf("AssertHTTPStatus code in Body: %+v", b)
+	}
+}
+
+func TestSecretCommandBuilder(t *testing.T) {
+	b := SecretCommand("vault kv get -field=env secret/app", "/etc/app/env").Build()
+	if b.Action != "secret_command" || b.Dest != "/etc/app/env" || b.Perm != "0600" {
+		t.Errorf("SecretCommand builder: %+v", b)
+	}
+	if b.Body != "vault kv get -field=env secret/app" {
+		t.Errorf("SecretCommand fetch cmd in Body: %q", b.Body)
+	}
+}
+
 func TestReadOnlyActionsClassification(t *testing.T) {
 	for _, a := range []string{"capture", "cat", "wait_http", "docker_ps", "verify_blob", "verify_image"} {
 		if !readOnlyActions[a] {

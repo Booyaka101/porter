@@ -3,6 +3,7 @@ package porterui
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -376,19 +377,31 @@ func HasPermission(permissions []string, required string) bool {
 	return false
 }
 
-// AuthMiddleware validates JWT tokens and adds user to context
-// publicAPIPrefixes are endpoints that must remain reachable without a JWT:
-// the login/status endpoints, and the machine-to-machine agent/build-client
-// channels which authenticate (or, today, don't) by their own scheme rather
-// than the user JWT. Protecting these with the user JWT would break agents.
-// TODO: give the agent channels a dedicated shared-secret/mTLS auth and drop
-// them from this allowlist.
+// publicAPIPrefixes are endpoints reachable without any auth: login/status.
 var publicAPIPrefixes = []string{
 	"/api/auth/login",
 	"/api/auth/status",
+}
+
+// agentChannelPrefixes are the machine-to-machine channels (agents, build
+// clients) that do not carry a user JWT. They are guarded by an optional
+// shared secret (PORTER_AGENT_TOKEN) rather than the user session: when that
+// env is set, a matching token is required; when unset, they remain open (the
+// historical behaviour, fine on a trusted LAN). This lets an operator enable
+// PORTER_AUTH for humans AND lock down the agent channels independently.
+var agentChannelPrefixes = []string{
 	"/api/agent/",
 	"/api/standalone-agent/",
 	"/api/build-client/",
+}
+
+func hasAnyPrefix(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if path == p || strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func isPublicAPIPath(path string) bool {
@@ -396,12 +409,22 @@ func isPublicAPIPath(path string) bool {
 	if !strings.HasPrefix(path, "/api/") {
 		return true
 	}
-	for _, p := range publicAPIPrefixes {
-		if path == p || strings.HasPrefix(path, p) {
-			return true
-		}
+	return hasAnyPrefix(path, publicAPIPrefixes)
+}
+
+// agentTokenValid reports whether the request carries the configured agent
+// shared secret (X-Porter-Agent-Token header or ?agent_token= query). Returns
+// true when no token is configured (channels stay open). Constant-time compare.
+func agentTokenValid(r *http.Request) bool {
+	want := os.Getenv("PORTER_AGENT_TOKEN")
+	if want == "" {
+		return true
 	}
-	return false
+	got := r.Header.Get("X-Porter-Agent-Token")
+	if got == "" {
+		got = r.URL.Query().Get("agent_token")
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 // authEnabled reports whether JWT enforcement is turned on. Default off to
@@ -421,6 +444,17 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for static assets and the public API allowlist.
 		if isPublicAPIPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Machine-to-machine agent channels: guarded by the optional shared
+		// secret (PORTER_AGENT_TOKEN), not the user JWT.
+		if hasAnyPrefix(r.URL.Path, agentChannelPrefixes) {
+			if !agentTokenValid(r) {
+				http.Error(w, `{"error": "unauthorized", "message": "Invalid agent token"}`, http.StatusUnauthorized)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}

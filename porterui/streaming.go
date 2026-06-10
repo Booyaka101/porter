@@ -351,7 +351,7 @@ func StreamingRoutes(r *mux.Router) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		allowSSEOrigin(w, req)
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
