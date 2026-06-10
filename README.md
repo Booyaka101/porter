@@ -81,6 +81,7 @@ func main() {
 - **Secrets (SOPS+age + pluggable)** - `Secret(sopsFile, dest)` decrypts locally and ships the plaintext over SFTP at `0600` — never in a shell command, never logged. `SecretCommand(fetchCmd, dest)` does the same for any backend with a CLI (Vault, OpenBao, 1Password, Infisical).
 - **Supply-chain gate** - `VerifyBlob`/`VerifyImage` run `cosign verify` as a pre-deploy admission gate; an unsigned/untampered-failed artifact aborts the deploy.
 - **Meaningful change accounting** - the RECAP `changed=` count now reflects real mutations (read-only and converged tasks report `ok`, not `changed`).
+- **Audited commands** - the shell each action emits is reviewed against 2026 practice: `apt` runs non-interactively, `tar` is quiet in automation, `curl` blocks https→http downgrade on redirect. Docker runs can opt into service hardening with `.Restart()`, `.Init()`, `.LogRotate()`.
 
 See [`examples/modern/main.go`](examples/modern/main.go) for an end-to-end deploy using all of the above.
 

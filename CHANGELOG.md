@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Supply-chain verification gate (`VerifyBlob`, `VerifyImage`) using cosign
 - Dashboard: optional agent-channel auth (`PORTER_AGENT_TOKEN`) and a deploy
   trace waterfall viewer at `/traces`
+- Docker run opt-in service-hardening modifiers: `.Restart(policy)`, `.Init()`,
+  `.LogRotate(maxSize, maxFiles)` (defaults unchanged)
 
 ### Changed
 - The action dispatcher is now a registry of small handlers (`actions_*.go`)
@@ -32,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first-boot admin password is randomly generated (or `PORTER_ADMIN_PASSWORD`)
 - `Changed` accounting now reflects real mutations (read-only/converged tasks
   report `ok`, not `changed`)
+- 2026 command audit (safe defaults): `DEBIAN_FRONTEND=noninteractive` on all
+  apt mutations, quiet `tar` (no `-v`) in automation, and curl
+  `--proto-redir =https --tlsv1.2` to block https→http downgrade on redirect
+- Action dispatch internals modernized (`gopls modernize`: `any`, `errors.As`,
+  `strings.SplitSeq`); the whole module is `staticcheck`-clean
 
 ### Security
 - AES credential storage fails closed on decryption errors

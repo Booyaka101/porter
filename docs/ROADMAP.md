@@ -33,6 +33,12 @@ library + CLI rather than YAML.
   frontend work).
 - **Post-quantum SSH** is already negotiated by default through `x/crypto`;
   staying current is a matter of routine toolchain/dependency updates.
+- **Opt-in modifiers for the behavior-changing items from the 2026 command
+  audit** — e.g. `apt --no-install-recommends` / `full-upgrade`, `npm ci`,
+  release-grade `go build` flags (`-trimpath`, `CGO_ENABLED=0`, `-ldflags="-s -w"`),
+  `rsync` without `-z` on fast LANs, `tar --zstd`, and `useradd -m`/service
+  accounts. These change observable behavior, so they should be explicit options
+  rather than new defaults.
 
 ## Non-goals
 
