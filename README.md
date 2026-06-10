@@ -413,13 +413,13 @@ Porter includes a full-featured web interface for managing remote servers. The U
 make build
 
 # Run the server
-./porter
+./porter-ui
 
 # Or in development mode
 make dev
 ```
 
-See [ui/README.md](./ui/README.md) for frontend development and [porterui/README.md](./porterui/README.md) for backend API documentation.
+See [web/ui/](./web/ui/) for the React frontend and [web/](./web/) for the dashboard backend.
 
 ### Docker Deployment
 
@@ -435,7 +435,7 @@ docker compose --profile mysql up -d
 
 Access the UI at http://localhost:8069
 
-**Default login:** `admin` / `admin` (change after first login!)
+**Authentication is on by default.** On first boot a random `admin` password is generated and printed once in the server log (or set `PORTER_ADMIN_PASSWORD`). Set `PORTER_AUTH=0` only on a fully trusted, isolated network.
 
 #### Docker Environment Variables
 
@@ -472,7 +472,7 @@ docker compose up -d
 
 Or using the binary directly:
 ```bash
-./porter -migrate-mysql \
+./porter-ui -migrate-mysql \
   -portable
 ```
 

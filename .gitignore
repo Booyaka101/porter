@@ -5,7 +5,7 @@
 *.so
 *.dylib
 porter
-cmd/porter/porter
+cmd/porter-ui/porter-ui
 
 # Test binary
 *.test
@@ -28,9 +28,9 @@ go.work
 Thumbs.db
 
 # Build artifacts
-cmd/porter/build/
-ui/build/
-ui/node_modules/
+cmd/porter-ui/build/
+web/ui/build/
+web/ui/node_modules/
 
 # Data files
 *.db
@@ -62,7 +62,9 @@ coverage.html
 *.log
 
 # Built UI assets (regenerate with `make ui`); keep the placeholder index.html
-porterui/build/assets/
-porterui/build/*.svg
-porterui/build/manifest.json
+web/build/assets/
+web/build/*.svg
+web/build/manifest.json
 porterw
+!cmd/porter-ui/build/index.html
+!web/build/index.html
