@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -326,14 +327,18 @@ func (e *Executor) writeFile(dest, content string, sudo bool, perm, owner string
 	if err := e.run("cat > " + tmp + " <<'PORTER_EOF'\n" + content + "\nPORTER_EOF"); err != nil {
 		return err
 	}
+	return e.placeStaged(tmp, dest, sudo, perm, owner)
+}
 
+// placeStaged moves an already-staged temp file at tmp into dest, applying mode
+// and owner. With a mode it uses install (atomic mode/owner); without a mode it
+// copies then chowns so install's default 0755 isn't forced. Runs under sudo
+// when sudo is set. Shared by writeFile and uploadFile.
+func (e *Executor) placeStaged(tmp, dest string, sudo bool, perm, owner string) error {
 	place := e.run
 	if sudo {
 		place = e.runSudo
 	}
-
-	// install sets mode (and owner) atomically when a mode is given; without
-	// a mode, copy then chown so we don't force install's default 0755.
 	if perm != "" {
 		cmd := "install -m " + perm
 		if owner != "" {
@@ -350,6 +355,89 @@ func (e *Executor) writeFile(dest, content string, sudo bool, perm, owner string
 	}
 	if owner != "" {
 		return place("chown " + owner + " " + dest)
+	}
+	return nil
+}
+
+// uploadFile streams the LOCAL file at localPath to dest on the remote over
+// SFTP. With no sudo/mode/owner it transfers straight to dest. Otherwise it
+// uploads into a private temp (mktemp, 0600 — so a secret never sits
+// world-readable while staged) and places it into dest with placeStaged.
+func (e *Executor) uploadFile(localPath, dest string, sudo bool, perm, owner string) error {
+	if !sudo && perm == "" && owner == "" {
+		return e.client.Upload(localPath, dest)
+	}
+	tmp, err := e.runCapture("mktemp")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = e.run("rm -f " + tmp) }()
+	if err := e.sftpUploadInto(localPath, tmp); err != nil {
+		return err
+	}
+	return e.placeStaged(tmp, dest, sudo, perm, owner)
+}
+
+// sftpUploadInto streams localPath into the existing remote file at remotePath
+// (truncating it), preserving that file's mode — so when remotePath was created
+// by mktemp (0600), the staged copy stays 0600 throughout the transfer.
+func (e *Executor) sftpUploadInto(localPath, remotePath string) error {
+	local, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open local %s: %w", localPath, err)
+	}
+	defer local.Close()
+
+	ftp, err := e.client.NewSftp()
+	if err != nil {
+		return fmt.Errorf("sftp session failed: %w", err)
+	}
+	defer ftp.Close()
+
+	remote, err := ftp.OpenFile(remotePath, os.O_WRONLY|os.O_TRUNC)
+	if err != nil {
+		return fmt.Errorf("open remote temp failed: %w", err)
+	}
+	if _, err := io.Copy(remote, local); err != nil {
+		remote.Close()
+		return fmt.Errorf("upload copy failed: %w", err)
+	}
+	return remote.Close()
+}
+
+// sudoStdinCommand returns the command to run and the stdin reader for piping a
+// local file into a remote command. Without sudo, stdin is just the file. With
+// sudo, the command is wrapped so `sudo -S` reads the password as the FIRST
+// stdin line (-k forces a fresh prompt; -p ” suppresses the prompt text) and
+// the command then reads the rest — so the file bytes are NOT consumed by sudo.
+func sudoStdinCommand(cmd, password string, sudo bool, file io.Reader) (string, io.Reader) {
+	if sudo {
+		return "sudo -k -S -p '' " + cmd, io.MultiReader(strings.NewReader(password+"\n"), file)
+	}
+	return cmd, file
+}
+
+// runWithStdin runs cmd on the remote with the LOCAL file at localPath piped to
+// its stdin — never staging the file on the target's disk. Honors sudo via
+// sudoStdinCommand.
+func (e *Executor) runWithStdin(cmd, localPath string, sudo bool) error {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open local %s: %w", localPath, err)
+	}
+	defer f.Close()
+
+	session, err := e.client.NewSession()
+	if err != nil {
+		return fmt.Errorf("ssh session failed: %w", err)
+	}
+	defer session.Close()
+
+	full, stdin := sudoStdinCommand(cmd, e.password, sudo, f)
+	session.Stdin = stdin
+	out, err := session.CombinedOutput(full)
+	if err != nil {
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }

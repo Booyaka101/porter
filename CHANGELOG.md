@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-10
+
+### Added
+- `Upload(localPath, remotePath)` — stream a LOCAL file to the host over SFTP
+  (binaries, image tars, keys), honoring `.Sudo()`/`.Mode()`/`.Owner()` with a
+  private 0600 staging temp so secrets are never world-readable mid-transfer.
+- `Run(cmd).StdinFile(localPath)` — pipe a LOCAL file into a remote command's
+  stdin with zero disk staging (e.g. `docker load`); the sudo password is
+  consumed as the first stdin line so the file bytes reach the command intact.
+
 ## [0.11.0] - 2026-06-10
 
 ### Added
@@ -87,7 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Variable system (Vars)
 - Task executor with progress reporting
 
-[Unreleased]: https://github.com/booyaka101/porter/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/booyaka101/porter/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/booyaka101/porter/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/booyaka101/porter/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/booyaka101/porter/compare/v0.1.0...v0.10.0
 [0.1.0]: https://github.com/booyaka101/porter/releases/tag/v0.1.0

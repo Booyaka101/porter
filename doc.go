@@ -20,6 +20,20 @@
 //	executor := porter.NewExecutor(client, "pass")
 //	stats, err := executor.Run("Deploy", tasks, porter.NewVars())
 //
+// # Shipping a Docker image
+//
+// Upload pushes a local file to the host (SFTP); StdinFile pipes a local file
+// straight into a remote command without staging it on the target's disk:
+//
+//	tasks := []porter.Task{
+//	    // stage the tar on the host, then load it
+//	    porter.Upload("build/app.tar", "/tmp/app.tar").Build(),
+//	    porter.Run("docker load -i /tmp/app.tar").Sudo().Build(),
+//
+//	    // or, zero-disk: pipe the local tar into `docker load` over stdin
+//	    porter.Run("docker load").StdinFile("build/app.tar").Sudo().Build(),
+//	}
+//
 // # Features
 //
 //   - Declarative DSL for defining deployment tasks

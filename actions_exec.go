@@ -10,6 +10,9 @@ func init() {
 }
 
 func actRun(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
+	if t.StdinFile != "" {
+		return e.runWithStdin(body, vars.Expand(t.StdinFile), t.Sudo)
+	}
 	if t.Sudo {
 		return e.runSudo(body)
 	}
