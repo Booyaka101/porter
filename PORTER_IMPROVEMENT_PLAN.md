@@ -156,8 +156,14 @@ Tests added: `assert`/`SecretCommand` builders + read-only classification (`feat
 
 Tests now total **159 assertions, all green**; build/vet/gofmt clean.
 
+## 10. Fourth autonomous pass (2026-06-10)
+
+- ✅ **Runtime dispatch now tested** — introduced a `cmdRunner` seam (`*goph.Client` satisfies it) so `runtime_test.go` exercises the dispatch switch, idempotency no-op detection, assertions, retry, and `Changed` accounting against a fake — closing the audit's "entire runtime untested" gap. No behavior change (NewExecutor wires `runner: client`).
+- ✅ **Trace viewer shipped** — `porterui/traces.go`: `GET /api/traces` (list), `GET /api/traces/{name}` (parsed spans, path-traversal-guarded), and a self-contained waterfall viewer at **`/traces`**. Tested (`traces_test.go`). The deferred "render in dashboard" item is now done without React-nav surgery.
+
+**167 test assertions, all green.**
+
 **Truly remaining = not implementable here (external infra / product policy):**
-- A porterui UI view that *renders* the deploy traces (data is now produced; a viewer is frontend work).
 - SSH user-cert *issuance/rotation* tooling — that's step-ca/Vault's job; porter correctly only *consumes* certs.
 - Progressive canary with live traffic weighting — needs a real proxy (kamal-proxy equivalent); porter ships atomic+health-gated+rollback, which covers VM zero-downtime without one.
 - Upgrading `x/crypto`/Go toolchain for newer PQ work — current default already negotiates ML-KEM; a bump needs a deliberate dependency decision.

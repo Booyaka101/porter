@@ -158,7 +158,7 @@ func (e *Executor) serviceEnabled(name string, user bool) bool {
 }
 
 func (e *Executor) pathExists(p string) bool {
-	_, err := e.client.Run("test -e " + p)
+	_, err := e.runner.Run("test -e " + p)
 	return err == nil
 }
 

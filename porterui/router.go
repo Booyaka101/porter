@@ -41,6 +41,7 @@ func SetupRoutes(r *mux.Router) {
 	BuildClientRoutes(r)
 	AIAgentRoutes(r)
 	AIAgentDebugRoutes(r)
+	TracesRoutes(r)
 }
 
 // SetupRoutesWithAuth registers every route and enforces JWT authentication on

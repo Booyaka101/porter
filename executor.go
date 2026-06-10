@@ -13,9 +13,17 @@ import (
 	"github.com/melbahja/goph"
 )
 
+// cmdRunner runs a command on the remote and returns its combined output.
+// *goph.Client satisfies it; tests substitute a fake to exercise the dispatch
+// switch, idempotency no-op detection, and assertions without a live SSH host.
+type cmdRunner interface {
+	Run(cmd string) ([]byte, error)
+}
+
 // Executor runs tasks on a remote server.
 type Executor struct {
 	client     *goph.Client
+	runner     cmdRunner
 	password   string
 	verbose    bool
 	dryRun     bool
@@ -32,7 +40,7 @@ type Executor struct {
 
 // NewExecutor creates a new Executor.
 func NewExecutor(client *goph.Client, password string) *Executor {
-	return &Executor{client: client, password: password, verbose: true}
+	return &Executor{client: client, runner: client, password: password, verbose: true}
 }
 
 // SetVerbose enables or disables verbose output.
@@ -194,7 +202,7 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 	// Check Creates condition - skip if path exists
 	if task.Creates != "" {
 		creates := vars.Expand(task.Creates)
-		if _, err := e.client.Run("test -e " + creates); err == nil {
+		if _, err := e.runner.Run("test -e " + creates); err == nil {
 			if e.verbose {
 				log.Printf("  \033[36m...skipped (exists: %s)\033[0m", creates)
 			}
@@ -294,7 +302,7 @@ func (e *Executor) sudo(cmd string) string {
 }
 
 func (e *Executor) run(cmd string) error {
-	_, err := e.client.Run(cmd)
+	_, err := e.runner.Run(cmd)
 	return err
 }
 
@@ -396,7 +404,7 @@ func (e *Executor) runCaptureMaybeSudo(sudo bool, cmd string) (string, error) {
 }
 
 func (e *Executor) runCapture(cmd string) (string, error) {
-	out, err := e.client.Run(cmd)
+	out, err := e.runner.Run(cmd)
 	return strings.TrimSpace(string(out)), err
 }
 
