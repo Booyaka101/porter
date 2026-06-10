@@ -1,0 +1,32 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - ineffassign
+    - misspell
+    - unconvert
+    - unused
+    - staticcheck
+  settings:
+    staticcheck:
+      # ST1003 (naming), QF* (refactor suggestions) are noisy on existing code;
+      # keep the high-signal checks.
+      checks:
+        - all
+        - -ST1003
+        - -QF1008
+  exclusions:
+    rules:
+      # Best-effort cleanup / fire-and-forget writes intentionally ignore errors.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

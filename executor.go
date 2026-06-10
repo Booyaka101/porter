@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -12,18 +13,34 @@ import (
 	"github.com/melbahja/goph"
 )
 
+// cmdRunner runs a command on the remote and returns its combined output.
+// *goph.Client satisfies it; tests substitute a fake to exercise the dispatch
+// switch, idempotency no-op detection, and assertions without a live SSH host.
+type cmdRunner interface {
+	Run(cmd string) ([]byte, error)
+}
+
 // Executor runs tasks on a remote server.
 type Executor struct {
 	client     *goph.Client
+	runner     cmdRunner
 	password   string
 	verbose    bool
 	dryRun     bool
 	onProgress ProgressFunc
+	tracer     *Tracer
+	rootSpanID string
+	logger     *slog.Logger
+
+	// noOp is set by an action that determined the remote was already in the
+	// desired state and did nothing (the Ensure* primitives). It is reset
+	// before every dispatch and read by exec to report "ok, unchanged".
+	noOp bool
 }
 
 // NewExecutor creates a new Executor.
 func NewExecutor(client *goph.Client, password string) *Executor {
-	return &Executor{client: client, password: password, verbose: true}
+	return &Executor{client: client, runner: client, password: password, verbose: true}
 }
 
 // SetVerbose enables or disables verbose output.
@@ -35,12 +52,51 @@ func (e *Executor) SetDryRun(v bool) *Executor { e.dryRun = v; return e }
 // OnProgress sets a callback function that is called for each task state change.
 func (e *Executor) OnProgress(fn ProgressFunc) *Executor { e.onProgress = fn; return e }
 
+// SetTracer attaches a Tracer so the deploy is recorded as a trace (one root
+// span per Run, one child span per task). Pass nil to disable.
+func (e *Executor) SetTracer(t *Tracer) *Executor { e.tracer = t; return e }
+
+// SetLogger attaches a structured logger. One record is emitted per task at
+// completion (action, status, changed, duration, and the trace_id when a
+// Tracer is set — enabling log<->trace correlation). Pass nil to disable.
+func (e *Executor) SetLogger(l *slog.Logger) *Executor { e.logger = l; return e }
+
+// logTask emits a structured record for a completed task, if a logger is set.
+func (e *Executor) logTask(p TaskProgress) {
+	if e.logger == nil {
+		return
+	}
+	attrs := []any{
+		"action", p.Action,
+		"name", p.Name,
+		"status", string(p.Status),
+		"attempt", p.Attempt,
+		"duration_ms", p.Duration.Milliseconds(),
+	}
+	if tid := e.tracer.TraceID(); tid != "" {
+		attrs = append(attrs, "trace_id", tid)
+	}
+	if p.Error != nil {
+		attrs = append(attrs, "error", p.Error.Error())
+	}
+	e.logger.Info("porter.task", attrs...)
+}
+
 // Run executes a list of tasks.
 func (e *Executor) Run(name string, tasks []Task, vars *Vars) (*Stats, error) {
 	stats := &Stats{Total: len(tasks)}
 
 	if e.verbose {
 		log.Printf("\n\033[1;36mPLAY [%s]\033[0m\n", name)
+	}
+
+	root := e.tracer.StartSpan("deploy "+name, "")
+	if root != nil {
+		root.SetAttribute("porter.task_count", len(tasks))
+		if e.client != nil {
+			root.SetAttribute("server.address", e.client.Config.Addr)
+		}
+		e.rootSpanID = root.ID()
 	}
 
 	for i, task := range tasks {
@@ -111,6 +167,10 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 		StartTime:  time.Now(),
 	}
 
+	// Emit one structured log record per task at completion, with the final
+	// status the function leaves on `progress`.
+	defer func() { e.logTask(progress) }()
+
 	if e.verbose {
 		mode := ""
 		if e.dryRun {
@@ -123,8 +183,17 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 	e.emitProgress(progress)
 
 	if e.dryRun {
+		changed, detail := e.preview(task, vars)
 		stats.OK++
-		progress.Status = StatusOK
+		if changed {
+			stats.Changed++
+			progress.Status = StatusChanged
+		} else {
+			progress.Status = StatusOK
+		}
+		if e.verbose && detail != "" {
+			log.Printf("  \033[35m%s\033[0m", detail)
+		}
 		progress.Duration = time.Since(progress.StartTime)
 		e.emitProgress(progress)
 		return nil
@@ -133,7 +202,7 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 	// Check Creates condition - skip if path exists
 	if task.Creates != "" {
 		creates := vars.Expand(task.Creates)
-		if _, err := e.client.Run("test -e " + creates); err == nil {
+		if _, err := e.runner.Run("test -e " + creates); err == nil {
 			if e.verbose {
 				log.Printf("  \033[36m...skipped (exists: %s)\033[0m", creates)
 			}
@@ -147,9 +216,15 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 
 	// Execute with retry support
 	var err error
+	var changed bool
 	delay := task.Delay
 	if delay == 0 {
 		delay = 2 * time.Second
+	}
+
+	span := e.tracer.StartSpan(task.Action+" "+name, e.rootSpanID)
+	if span != nil {
+		span.SetAttribute("porter.action", task.Action)
 	}
 
 	for i := 0; i < maxAttempts; i++ {
@@ -168,11 +243,17 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 			e.emitProgress(progress)
 		}
 
-		err = e.exec(task, vars)
+		changed, err = e.exec(task, vars)
 		if err == nil {
 			break
 		}
 		progress.Error = err
+	}
+
+	if span != nil {
+		span.SetAttribute("porter.attempts", progress.Attempt)
+		span.SetAttribute("porter.changed", changed && err == nil)
+		span.End(err)
 	}
 
 	progress.Duration = time.Since(progress.StartTime)
@@ -198,8 +279,12 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 	}
 
 	stats.OK++
-	stats.Changed++
-	progress.Status = StatusChanged
+	if changed {
+		stats.Changed++
+		progress.Status = StatusChanged
+	} else {
+		progress.Status = StatusOK
+	}
 	e.emitProgress(progress)
 	return nil
 }
@@ -209,11 +294,15 @@ func (e *Executor) runTask(idx int, task Task, vars *Vars, stats *Stats) error {
 // =============================================================================
 
 func (e *Executor) sudo(cmd string) string {
-	return "echo " + e.password + " | sudo -S " + cmd
+	// Feed the password to sudo over stdin via printf (a shell builtin, so it
+	// never lands in the remote process table) and shell-quote it so embedded
+	// metacharacters can neither break the command nor inject shell. -p ''
+	// suppresses the prompt that would otherwise pollute stdout.
+	return "printf '%s\\n' " + shellEscape(e.password) + " | sudo -S -p '' " + cmd
 }
 
 func (e *Executor) run(cmd string) error {
-	_, err := e.client.Run(cmd)
+	_, err := e.runner.Run(cmd)
 	return err
 }
 
@@ -298,8 +387,24 @@ func (e *Executor) runSudo(cmd string) error {
 	return e.run(e.sudo(cmd))
 }
 
+// runMaybeSudo runs cmd under sudo only when sudo is true.
+func (e *Executor) runMaybeSudo(sudo bool, cmd string) error {
+	if sudo {
+		return e.runSudo(cmd)
+	}
+	return e.run(cmd)
+}
+
+// runCaptureMaybeSudo captures cmd output, under sudo only when sudo is true.
+func (e *Executor) runCaptureMaybeSudo(sudo bool, cmd string) (string, error) {
+	if sudo {
+		return e.runSudoCapture(cmd)
+	}
+	return e.runCapture(cmd)
+}
+
 func (e *Executor) runCapture(cmd string) (string, error) {
-	out, err := e.client.Run(cmd)
+	out, err := e.runner.Run(cmd)
 	return strings.TrimSpace(string(out)), err
 }
 
@@ -308,7 +413,7 @@ func (e *Executor) runSudoCapture(cmd string) (string, error) {
 }
 
 func (e *Executor) parseOpt(opts, key string) string {
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		parts := strings.SplitN(opt, ":", 2)
 		if len(parts) == 2 && parts[0] == key {
 			return parts[1]
@@ -336,589 +441,42 @@ func (e *Executor) getSSHDestination() string {
 // ACTION DISPATCHER
 // =============================================================================
 
-func (e *Executor) exec(t Task, vars *Vars) error {
-	src := vars.Expand(t.Src)
-	dest := vars.Expand(t.Dest)
-	body := vars.Expand(t.Body)
-	perm := vars.Expand(t.Perm)
-	own := vars.Expand(t.Own)
+// readOnlyActions never mutate the remote — running them is not a "change".
+// Everything not listed is treated as mutating (the safe default for an
+// imperative action). The Ensure* primitives report no-op dynamically via
+// e.noOp instead of appearing here.
+var readOnlyActions = map[string]bool{
+	"cat": true, "read_file": true, "capture": true, "capture_sudo": true,
+	"file_exists": true, "dir_exists": true, "service_running": true,
+	"wait_port": true, "wait_http": true, "wait_file": true, "pause": true,
+	"disk_space": true, "memory_info": true, "cpu_info": true, "load_average": true,
+	"command_exists": true, "nproc": true, "sysinfo": true,
+	"require_disk": true, "require_memory": true, "require_command": true,
+	"docker_ps": true, "docker_images": true, "docker_volumes": true,
+	"docker_networks": true, "docker_info": true,
+	"compose_ps": true, "compose_logs": true, "compose_top": true,
+	"svc_status": true, "svc_list": true, "svc_timers": true,
+	"journal": true, "journal_unit": true, "git_describe": true,
+	"ping": true, "curl": true, "wget": true,
+	"verify_blob": true, "verify_image": true,
+	"assert_service_active": true, "assert_service_enabled": true,
+	"assert_process": true, "assert_port_listening": true,
+	"assert_file_exists": true, "assert_file_contains": true,
+	"assert_package": true, "assert_http_status": true, "assert_command": true,
+}
 
-	switch t.Action {
-	// File operations
-	case "upload":
-		return e.client.Upload(src, dest)
-	case "copy":
-		return e.runSudo("cp " + src + " " + dest)
-	case "move":
-		return e.runSudo("mv " + src + " " + dest)
-	case "mkdir":
-		return e.runSudo("mkdir -p " + dest)
-	case "rm":
-		return e.runSudo("rm -rf " + dest)
-	case "touch":
-		return e.run("touch " + dest)
-	case "symlink":
-		return e.runSudo("ln -sf " + src + " " + dest)
-	case "cat":
-		return e.run("cat " + dest)
-	case "sed":
-		return e.runSudo("sed -i '" + body + "' " + dest)
-	case "write":
-		return e.writeFile(dest, body, t.Sudo, perm, own)
-	case "chown":
-		owner := own
-		if owner == "" {
-			owner = vars.Get("default_owner")
-		}
-		if owner == "" {
-			owner = "root:root"
-		}
-		flag := ""
-		if t.Rec {
-			flag = "-R "
-		}
-		return e.runSudo("chown " + flag + owner + " " + dest)
-	case "chmod":
-		mode := perm
-		if mode == "" {
-			mode = "+x"
-		}
-		return e.runSudo("chmod " + mode + " " + dest)
-	case "trust_ca":
-		return e.trustCA(dest, src)
-	case "install":
-		if err := e.runSudo("cp " + src + " " + dest); err != nil {
-			return err
-		}
-		return e.runSudo("chmod +x " + dest)
-
-	// Command execution
-	case "run":
-		if t.Sudo {
-			return e.runSudo(body)
-		}
-		return e.run(body)
-	case "pause":
-		if d, err := time.ParseDuration(body); err == nil {
-			time.Sleep(d)
-		}
-		return nil
-
-	// Archives
-	case "tar_create":
-		return e.runSudo("tar -cvf " + dest + " -C $(dirname " + src + ") $(basename " + src + ")")
-	case "tar_extract":
-		return e.runSudo("tar -xvf " + src + " -C " + dest)
-	case "targz_create":
-		return e.runSudo("tar -czvf " + dest + " -C $(dirname " + src + ") $(basename " + src + ")")
-	case "targz_extract":
-		return e.runSudo("tar -xzvf " + src + " -C " + dest)
-	case "zip_create":
-		return e.runSudo("zip -r " + dest + " " + src)
-	case "zip_extract":
-		return e.runSudo("unzip -o " + src + " -d " + dest)
-
-	// Package management
-	case "apt_update":
-		return e.runSudo("apt-get update")
-	case "apt_install":
-		return e.runSudo("apt-get install -y " + body)
-	case "apt_remove":
-		return e.runSudo("apt-get remove -y " + body)
-	case "apt_upgrade":
-		return e.runSudo("apt-get upgrade -y")
-
-	// User management
-	case "user_add":
-		return e.runSudo(e.buildUserCmd("useradd", dest, body))
-	case "user_del":
-		return e.runSudo("userdel -r " + dest)
-	case "user_mod":
-		return e.runSudo(e.buildUserCmd("usermod", dest, body))
-
-	// Process management
-	case "kill":
-		return e.runSudo("kill " + dest)
-	case "killall":
-		return e.runSudo("killall " + dest)
-	case "pkill":
-		return e.runSudo("pkill " + dest)
-
-	// Network
-	case "curl":
-		return e.run("curl -fsSL -o " + dest + " " + src)
-	case "wget":
-		return e.run("wget -q -O " + dest + " " + src)
-	case "ping":
-		return e.run("ping -c 1 " + dest)
-
-	// Git
-	case "git_clone":
-		cmd := "git clone"
-		if strings.Contains(body, "shallow:true") {
-			cmd += " --depth 1"
-		} else if depth := e.parseOpt(body, "depth"); depth != "" {
-			cmd += " --depth " + depth
-		}
-		cmd += " " + src + " " + dest
-		return e.run(cmd)
-	case "git_pull":
-		return e.run("cd " + dest + " && git pull --ff-only")
-	case "git_checkout":
-		return e.run("cd " + dest + " && git checkout " + body)
-	case "git_lfs_pull":
-		return e.run("cd " + dest + " && git lfs pull")
-	case "git_fetch":
-		cmd := "cd " + dest + " && git fetch origin"
-		if strings.Contains(body, "prune:true") {
-			cmd += " --prune"
-		}
-		return e.run(cmd)
-	case "git_reset":
-		cmd := "cd " + dest + " && git reset"
-		if strings.Contains(body, "hard:true") || body == "HEAD" || body == "" {
-			cmd += " --hard"
-		}
-		if body != "" && !strings.Contains(body, ":") {
-			cmd += " " + body
-		}
-		return e.run(cmd)
-	case "git_clean":
-		cmd := "cd " + dest + " && git clean -f -d"
-		if strings.Contains(body, "force:true") {
-			cmd += " -x"
-		}
-		return e.run(cmd)
-	case "git_describe":
-		out, err := e.runCapture("cd " + dest + " && git describe --tags --always 2>/dev/null || git rev-parse --short HEAD")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-
-	// Cron
-	case "cron_add":
-		return e.run("(crontab -l 2>/dev/null; echo '" + body + "') | crontab -")
-	case "cron_remove":
-		return e.run("crontab -l | grep -v '" + body + "' | crontab -")
-
-	// Firewall
-	case "ufw_allow":
-		return e.runSudo("ufw allow " + dest)
-	case "ufw_deny":
-		return e.runSudo("ufw deny " + dest)
-	case "ufw_enable":
-		return e.runSudo("ufw --force enable")
-	case "ufw_disable":
-		return e.runSudo("ufw disable")
-
-	// System
-	case "reboot":
-		return e.runSudo("reboot")
-	case "shutdown":
-		return e.runSudo("shutdown -h now")
-	case "hostname":
-		return e.runSudo("hostnamectl set-hostname " + dest)
-	case "sysctl":
-		return e.runSudo("sysctl -w " + src + "=" + dest)
-
-	// Systemd
-	case "service":
-		return e.serviceCtl(dest, t.State, t.User)
-	case "service_list":
-		userFlag := ""
-		if t.User {
-			userFlag = "--user "
-		}
-		out, err := e.runCapture("systemctl " + userFlag + "list-units --type=service --all --no-pager --plain --no-legend")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "timer_list":
-		userFlag := ""
-		if t.User {
-			userFlag = "--user "
-		}
-		out, err := e.runCapture("systemctl " + userFlag + "list-units --type=timer --all --no-pager --plain --no-legend")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "daemon_reload":
-		if t.User {
-			return e.run("systemctl --user daemon-reload")
-		}
-		return e.runSudo("systemctl daemon-reload")
-	case "template":
-		return e.installTemplate(dest, body, t.User)
-	case "journal":
-		return e.journalCtl(dest, body, t.User, t.Sudo, t.Register, vars)
-
-	// Docker images
-	case "docker_pull":
-		return e.runSudo("docker pull " + dest)
-	case "docker_build":
-		return e.runSudo("docker build -t " + dest + " " + src)
-	case "docker_save":
-		return e.runSudo("docker save -o " + dest + " " + src)
-	case "docker_load":
-		return e.runSudo("docker load -i " + src)
-	case "docker_export":
-		return e.runSudo("docker export -o " + dest + " " + src)
-	case "docker_import":
-		return e.runSudo("docker import " + src + " " + dest)
-	case "docker_tag":
-		return e.runSudo("docker tag " + src + " " + dest)
-	case "docker_push":
-		return e.runSudo("docker push " + dest)
-	case "docker_rmi":
-		return e.runSudo("docker rmi " + dest)
-	case "docker_prune":
-		return e.runSudo("docker system prune -af")
-
-	// Docker list/info
-	case "docker_ps":
-		all := ""
-		if strings.Contains(body, "all:true") {
-			all = "-a "
-		}
-		out, err := e.runCapture("sudo docker ps " + all + "--format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.CreatedAt}}|{{.State}}'")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "docker_images":
-		out, err := e.runCapture("sudo docker images --format '{{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}'")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "docker_volumes":
-		out, err := e.runCapture("sudo docker volume ls --format '{{.Name}}|{{.Driver}}|{{.Mountpoint}}'")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "docker_networks":
-		out, err := e.runCapture("sudo docker network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}'")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "docker_info":
-		out, err := e.runCapture("sudo docker info --format '{{.Containers}}|{{.ContainersRunning}}|{{.Images}}'")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-
-	// Docker containers
-	case "docker":
-		return e.dockerCtl(dest, t.State, t.Src, body)
-
-	// Docker Compose
-	case "compose":
-		return e.composeCtl(dest, t.State, t.Src, body)
-
-	// Wait/Health checks
-	case "wait_port":
-		return e.waitForPort(dest, body, t.Timeout)
-	case "wait_http":
-		return e.waitForHttp(dest, t.State, t.Timeout)
-	case "wait_file":
-		return e.waitForFile(dest, t.Timeout)
-
-	// Checks (set variable based on result)
-	case "file_exists":
-		exists := e.checkFileExists(dest)
-		if t.Register != "" {
-			if exists {
-				vars.Set(t.Register, "true")
-			} else {
-				vars.Set(t.Register, "false")
-			}
-		}
-		return nil
-	case "dir_exists":
-		exists := e.checkDirExists(dest)
-		if t.Register != "" {
-			if exists {
-				vars.Set(t.Register, "true")
-			} else {
-				vars.Set(t.Register, "false")
-			}
-		}
-		return nil
-	case "service_running":
-		running := e.checkServiceRunning(dest, t.User)
-		if t.Register != "" {
-			if running {
-				vars.Set(t.Register, "true")
-			} else {
-				vars.Set(t.Register, "false")
-			}
-		}
-		return nil
-
-	// Capture output to variable
-	case "capture":
-		out, err := e.runCapture(body)
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "capture_sudo":
-		out, err := e.runSudoCapture(body)
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-
-	// Backup/Restore
-	case "backup":
-		return e.runSudo("cp -a " + dest + " " + dest + ".bak.$(date +%Y%m%d%H%M%S)")
-	case "restore":
-		return e.runSudo("cp -a $(ls -t " + dest + ".bak.* 2>/dev/null | head -1) " + dest)
-
-	// Environment file
-	case "env_set":
-		return e.run("grep -q '^" + src + "=' " + dest + " && sed -i 's|^" + src + "=.*|" + src + "=" + body + "|' " + dest + " || echo '" + src + "=" + body + "' >> " + dest)
-	case "env_delete":
-		return e.run("sed -i '/^" + src + "=/d' " + dest)
-
-	// Rsync
-	case "rsync":
-		return e.rsyncExec(src, dest, body, t.Sudo)
-	case "rsync_install":
-		return e.rsyncInstall()
-	case "rsync_check":
-		installed := e.rsyncCheck()
-		if t.Register != "" {
-			if installed {
-				vars.Set(t.Register, "true")
-			} else {
-				vars.Set(t.Register, "false")
-			}
-		}
-		return nil
-	case "rsync_version":
-		out, err := e.runCapture("rsync --version | head -1")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-
-	// Nginx
-	case "nginx_test":
-		return e.runSudo("nginx -t")
-	case "nginx_reload":
-		return e.runSudo("systemctl reload nginx")
-
-	// Wibu License (CMU)
-	case "wibu_generate":
-		out, err := e.runCapture("cmu -c" + src + " -f " + dest)
-		if err != nil {
-			return fmt.Errorf("wibu generate failed: %s - %w", out, err)
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "wibu_apply":
-		out, err := e.runCapture("cmu -i -f " + src)
-		if err != nil {
-			return fmt.Errorf("wibu apply failed: %s - %w", out, err)
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "wibu_info":
-		out, err := e.runCapture("cmu -l")
-		if err != nil {
-			return fmt.Errorf("wibu info failed: %w", err)
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "wibu_list":
-		out, err := e.runCapture("cmu -x")
-		if err != nil {
-			return fmt.Errorf("wibu list failed: %w", err)
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-
-	// SFTP Operations
-	case "download":
-		data, err := e.sftpRead(src)
-		if err != nil {
-			return fmt.Errorf("download failed: %w", err)
-		}
-		if t.Register != "" {
-			vars.SetBytes(t.Register, data)
-		}
-		return nil
-	case "upload_bytes":
-		data := vars.GetBytes(src)
-		if data == nil {
-			return fmt.Errorf("no data in variable: %s", src)
-		}
-		return e.sftpWrite(dest, data)
-	case "read_file":
-		data, err := e.sftpRead(src)
-		if err != nil {
-			return fmt.Errorf("read file failed: %w", err)
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, string(data))
-		}
-		return nil
-	case "write_bytes":
-		data := vars.GetBytes(body)
-		if data == nil {
-			data = []byte(body)
-		}
-		return e.sftpWrite(dest, data)
-
-	// Go build operations
-	case "go":
-		return e.goCtl(dest, t.State, t.Src, body)
-
-	// npm operations
-	case "npm":
-		return e.npmCtl(dest, t.State, body)
-
-	// System info operations
-	case "disk_space":
-		out, err := e.runCapture("df -BG " + dest + " | awk 'NR==2 {print $4}' | tr -d 'G'")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "memory_info":
-		out, err := e.runCapture("awk '/MemAvailable/ {print int($2/1024/1024)}' /proc/meminfo")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "cpu_info":
-		out, err := e.runCapture("nproc")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "load_avg":
-		out, err := e.runCapture("cat /proc/loadavg | cut -d' ' -f1-3")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "nproc":
-		out, err := e.runCapture("nproc")
-		if err != nil {
-			return err
-		}
-		if t.Register != "" {
-			vars.Set(t.Register, out)
-		}
-		return nil
-	case "command_exists":
-		_, err := e.runCapture("command -v " + dest)
-		if t.Register != "" {
-			if err == nil {
-				vars.Set(t.Register, "true")
-			} else {
-				vars.Set(t.Register, "false")
-			}
-		}
-		return nil
-	case "require_disk":
-		out, err := e.runCapture("df -BG " + dest + " | awk 'NR==2 {print $4}' | tr -d 'G'")
-		if err != nil {
-			return err
-		}
-		// Parse and compare
-		var avail int
-		fmt.Sscanf(out, "%d", &avail)
-		var required int
-		fmt.Sscanf(body, "%d", &required)
-		if avail < required {
-			return fmt.Errorf("insufficient disk space: %dGB available, %dGB required", avail, required)
-		}
-		return nil
-	case "require_memory":
-		out, err := e.runCapture("awk '/MemAvailable/ {print int($2/1024/1024)}' /proc/meminfo")
-		if err != nil {
-			return err
-		}
-		var avail int
-		fmt.Sscanf(out, "%d", &avail)
-		var required int
-		fmt.Sscanf(body, "%d", &required)
-		if avail < required {
-			return fmt.Errorf("insufficient memory: %dGB available, %dGB required", avail, required)
-		}
-		return nil
-	case "require_command":
-		_, err := e.runCapture("command -v " + dest)
-		if err != nil {
-			return fmt.Errorf("required command not found: %s", dest)
-		}
-		return nil
-
-	default:
-		return fmt.Errorf("unknown action: %s", t.Action)
+// exec runs the action and reports whether it changed remote state. A
+// read-only action, or an Ensure* primitive that found the host already
+// converged (e.noOp), counts as ok-but-unchanged.
+func (e *Executor) exec(t Task, vars *Vars) (bool, error) {
+	e.noOp = false
+	if err := e.dispatch(t, vars); err != nil {
+		return false, err
 	}
+	if e.noOp || readOnlyActions[t.Action] {
+		return false, nil
+	}
+	return true, nil
 }
 
 // =============================================================================
@@ -1001,8 +559,9 @@ func (e *Executor) journalCtl(unit, flags string, user, sudo bool, register stri
 // =============================================================================
 
 func (e *Executor) buildUserCmd(base, user, opts string) string {
-	cmd := base
-	for _, opt := range strings.Split(opts, ";") {
+	var cmd strings.Builder
+	cmd.WriteString(base)
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -1013,17 +572,17 @@ func (e *Executor) buildUserCmd(base, user, opts string) string {
 		switch parts[0] {
 		case "groups":
 			if base == "usermod" {
-				cmd += " -aG " + parts[1]
+				cmd.WriteString(" -aG " + parts[1])
 			} else {
-				cmd += " -G " + parts[1]
+				cmd.WriteString(" -G " + parts[1])
 			}
 		case "shell":
-			cmd += " -s " + parts[1]
+			cmd.WriteString(" -s " + parts[1])
 		case "home":
-			cmd += " -m -d " + parts[1]
+			cmd.WriteString(" -m -d " + parts[1])
 		}
 	}
-	return cmd + " " + user
+	return cmd.String() + " " + user
 }
 
 // =============================================================================
@@ -1052,11 +611,12 @@ func (e *Executor) dockerCtl(container, state, image, opts string) error {
 }
 
 func (e *Executor) buildDockerRun(container, image, opts string) string {
-	cmd := "docker run -d"
+	var cmd strings.Builder
+	cmd.WriteString("docker run -d")
 	if container != "" {
-		cmd += " --name " + container
+		cmd.WriteString(" --name " + container)
 	}
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -1066,28 +626,40 @@ func (e *Executor) buildDockerRun(container, image, opts string) string {
 		}
 		switch parts[0] {
 		case "ports":
-			for _, p := range strings.Split(parts[1], ",") {
+			for p := range strings.SplitSeq(parts[1], ",") {
 				if p != "" {
-					cmd += " -p " + p
+					cmd.WriteString(" -p " + p)
 				}
 			}
 		case "volumes":
-			for _, v := range strings.Split(parts[1], ",") {
+			for v := range strings.SplitSeq(parts[1], ",") {
 				if v != "" {
-					cmd += " -v " + v
+					cmd.WriteString(" -v " + v)
 				}
 			}
 		case "env":
-			for _, ev := range strings.Split(parts[1], ",") {
+			for ev := range strings.SplitSeq(parts[1], ",") {
 				if ev != "" {
-					cmd += " -e " + ev
+					cmd.WriteString(" -e " + ev)
 				}
 			}
 		case "network":
-			cmd += " --network " + parts[1]
+			cmd.WriteString(" --network " + parts[1])
+		case "restart":
+			cmd.WriteString(" --restart " + parts[1])
+		case "init":
+			if parts[1] == "true" {
+				cmd.WriteString(" --init")
+			}
+		case "logrotate":
+			lr := strings.SplitN(parts[1], ",", 2)
+			cmd.WriteString(" --log-opt max-size=" + lr[0])
+			if len(lr) == 2 {
+				cmd.WriteString(" --log-opt max-file=" + lr[1])
+			}
 		}
 	}
-	return cmd + " " + image
+	return cmd.String() + " " + image
 }
 
 // =============================================================================
@@ -1253,6 +825,41 @@ func (e *Executor) sftpWrite(path string, data []byte) error {
 	return nil
 }
 
+// sftpWriteSecret writes secret data to dest over SFTP, applying the mode
+// BEFORE writing the bytes so the plaintext is never briefly world-readable,
+// then optionally chowns. perm defaults to 0600. The plaintext is never placed
+// in a shell command or logged.
+func (e *Executor) sftpWriteSecret(dest string, data []byte, perm, owner string, sudo bool) error {
+	ftp, err := e.client.NewSftp()
+	if err != nil {
+		return fmt.Errorf("sftp session failed: %w", err)
+	}
+	defer ftp.Close()
+
+	mode := parseFileMode(perm, 0o600)
+
+	file, err := ftp.Create(dest)
+	if err != nil {
+		return fmt.Errorf("create remote secret failed: %w", err)
+	}
+	// Tighten permissions before any bytes land.
+	if err := ftp.Chmod(dest, mode); err != nil {
+		file.Close()
+		return fmt.Errorf("chmod remote secret failed: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return fmt.Errorf("write remote secret failed: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close remote secret failed: %w", err)
+	}
+	if owner != "" {
+		return e.runMaybeSudo(sudo, "chown "+owner+" "+shellEscape(dest))
+	}
+	return nil
+}
+
 // =============================================================================
 // GO BUILD HELPERS
 // =============================================================================
@@ -1268,7 +875,7 @@ func (e *Executor) goCtl(path, state, output, opts string) error {
 	parallel := ""
 	failfast := false
 
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -1365,7 +972,7 @@ func (e *Executor) npmCtl(path, state, opts string) error {
 	legacyPeerDeps := false
 	script := ""
 
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -1484,7 +1091,7 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 	sshKey := ""   // SSH key path for local mode
 
 	// Parse options from body (semicolon-separated key:value pairs)
-	for _, opt := range strings.Split(opts, ";") {
+	for opt := range strings.SplitSeq(opts, ";") {
 		if opt == "" {
 			continue
 		}
@@ -1558,14 +1165,14 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 		cmd += " --bwlimit=" + bwLimit
 	}
 	if exclude != "" {
-		for _, ex := range strings.Split(exclude, ",") {
+		for ex := range strings.SplitSeq(exclude, ",") {
 			if ex != "" {
 				cmd += " --exclude='" + ex + "'"
 			}
 		}
 	}
 	if include != "" {
-		for _, inc := range strings.Split(include, ",") {
+		for inc := range strings.SplitSeq(include, ",") {
 			if inc != "" {
 				cmd += " --include='" + inc + "'"
 			}
@@ -1582,11 +1189,17 @@ func (e *Executor) rsyncExec(src, dest, opts string, sudo bool) error {
 		if sshKey != "" {
 			sshCmd += " -i " + sshKey
 		}
-		sshCmd += " -o StrictHostKeyChecking=no"
+		sshCmd += " -o StrictHostKeyChecking=" + sshStrictOption()
+		if kh := knownHostsFile(); kh != "" {
+			sshCmd += " -o UserKnownHostsFile=" + shellEscape(kh)
+		}
 
-		// Use sshpass if password is available and no SSH key specified
+		// Use sshpass if password is available and no SSH key specified.
+		// Pass the password via the SSHPASS env var (sshpass -e) rather than
+		// -p, so it never appears in the local process argv, and shell-quote
+		// it. Prefer key/cert auth — password+sshpass remains a fallback.
 		if e.password != "" && sshKey == "" {
-			cmd = "sshpass -p '" + e.password + "' " + cmd + " -e \"" + sshCmd + "\""
+			cmd = "SSHPASS=" + shellEscape(e.password) + " sshpass -e " + cmd + " -e \"" + sshCmd + "\""
 		} else {
 			cmd += " -e \"" + sshCmd + "\""
 		}

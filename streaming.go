@@ -2,6 +2,7 @@ package porter
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -51,9 +52,7 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 	var wg sync.WaitGroup
 
 	// Stream stdout
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -64,12 +63,10 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 				callback(StreamEvent{Type: "stdout", Data: line})
 			}
 		}
-	}()
+	})
 
 	// Stream stderr
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -80,7 +77,7 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 				callback(StreamEvent{Type: "stderr", Data: line})
 			}
 		}
-	}()
+	})
 
 	// Wait for output streaming to complete
 	wg.Wait()
@@ -89,7 +86,8 @@ func RunStreaming(client *goph.Client, cmd string, callback StreamFunc) (string,
 	exitCode := 0
 	err = session.Wait()
 	if err != nil {
-		if exitErr, ok := err.(*ssh.ExitError); ok {
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitStatus()
 			err = nil // Not a real error, just non-zero exit
 		}

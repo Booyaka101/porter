@@ -68,6 +68,27 @@ func main() {
 - **Template Expansion** - Variable substitution in files and commands
 - **Idempotent Operations** - Skip tasks when target path exists with `Creates()`
 
+### Modern (2026) capabilities
+
+- **Verified host keys** - TOFU by default (pins on first use, rejects changed keys as MITM); `SetHostKeyMode(HostKeyStrict)` and `TrustHostCA()` for step-ca host certificates. No more `InsecureIgnoreHostKey`.
+- **SSH certificate auth** - `ConnectWithCert()` for short-lived certs (step-ca / Vault SSH / Teleport); keepalives via `StartKeepalive()`; non-default `Config.Port`.
+- **Bastion / ProxyJump** - `ConnectViaJump(target, jumps...)` tunnels through one or more bastions without exposing an SSH agent on intermediate hosts; host keys verified at every hop.
+- **Declarative state** - `EnsureFile/EnsureDir/EnsureSymlink/EnsurePackage/EnsureLine/EnsureServiceRunning/EnsureServiceEnabled/EnsureCron/EnsureUser/EnsureMode/EnsureOwner/EnsureAbsent/EnsureGitRepo` gather a fact, diff, and **no-op when already converged** (pyinfra-style; `EnsureCron`/`EnsureUser` fix the duplicate-append / non-idempotent gaps of `CronAdd`/`UserAdd`). A real `SetDryRun(true)` previews exactly what would change.
+- **Health assertions (Goss-style)** - `AssertServiceActive/AssertServiceEnabled/AssertProcessRunning/AssertPortListening/AssertFileExists/AssertFileContains/AssertPackageInstalled/AssertHTTPStatus/AssertCommandSucceeds` fail the deploy if reality doesn't match (post-deploy smoke test or pre-flight guard).
+- **Post-quantum SSH** - the underlying `x/crypto/ssh` negotiates `mlkem768x25519-sha256` (ML-KEM hybrid) by default when both ends support it (OpenSSH ≥ 10.0).
+- **Atomic releases & rollback** - `NewRelease(base).HealthCheck(cmd).Deploy(...)` deploys into a timestamped dir, health-checks, then flips `current` via an atomic `rename(2)`; `Rollback(base)` reverts in one step. (Kamal-style, but for plain systemd/VM targets.)
+- **Deploy-as-a-trace** - `SetTracer(NewTracer(w, env, service))` records each deploy as an OpenTelemetry-shaped span tree (JSONL); `SetLogger()` adds structured logs with `trace_id` correlation. The web UI records every deploy to `<dataDir>/traces/` and serves a waterfall viewer at **`/traces`**.
+- **Secrets (SOPS+age + pluggable)** - `Secret(sopsFile, dest)` decrypts locally and ships the plaintext over SFTP at `0600` — never in a shell command, never logged. `SecretCommand(fetchCmd, dest)` does the same for any backend with a CLI (Vault, OpenBao, 1Password, Infisical).
+- **Supply-chain gate** - `VerifyBlob`/`VerifyImage` run `cosign verify` as a pre-deploy admission gate; an unsigned/untampered-failed artifact aborts the deploy.
+- **Meaningful change accounting** - the RECAP `changed=` count now reflects real mutations (read-only and converged tasks report `ok`, not `changed`).
+- **Audited commands** - the shell each action emits is reviewed against 2026 practice: `apt` runs non-interactively, `tar` is quiet in automation, `curl` blocks https→http downgrade on redirect. Docker runs can opt into service hardening with `.Restart()`, `.Init()`, `.LogRotate()`.
+
+See [`examples/modern/main.go`](examples/modern/main.go) for an end-to-end deploy using all of the above.
+
+### Web UI security
+
+The dashboard now enforces JWT auth **by default** (set `PORTER_AUTH=0` only on a fully trusted isolated network; the wiring previously didn't apply the middleware at all); WebSocket upgrades and SSE streams are origin-checked (`PORTER_ALLOWED_ORIGINS` for cross-origin frontends); machine-to-machine agent channels take an optional shared secret (`PORTER_AGENT_TOKEN`) so they can be locked down independently of human auth; stored credentials encrypt/decrypt **fail closed**; the default admin password is random (or `PORTER_ADMIN_PASSWORD`), logged once.
+
 ## DSL Reference
 
 ### File Operations
@@ -393,13 +414,13 @@ Porter includes a full-featured web interface for managing remote servers. The U
 make build
 
 # Run the server
-./porter
+./porter-ui
 
 # Or in development mode
 make dev
 ```
 
-See [ui/README.md](./ui/README.md) for frontend development and [porterui/README.md](./porterui/README.md) for backend API documentation.
+See [web/ui/](./web/ui/) for the React frontend and [web/](./web/) for the dashboard backend.
 
 ### Docker Deployment
 
@@ -415,7 +436,7 @@ docker compose --profile mysql up -d
 
 Access the UI at http://localhost:8069
 
-**Default login:** `admin` / `admin` (change after first login!)
+**Authentication is on by default.** On first boot a random `admin` password is generated and printed once in the server log (or set `PORTER_ADMIN_PASSWORD`). Set `PORTER_AUTH=0` only on a fully trusted, isolated network.
 
 #### Docker Environment Variables
 
@@ -452,86 +473,26 @@ docker compose up -d
 
 Or using the binary directly:
 ```bash
-./porter -migrate-mysql \
+./porter-ui -migrate-mysql \
   -portable
 ```
 
 This will migrate all users, machines, scheduled jobs, history, and settings from MySQL to SQLite.
 
-## Engineering Review (Principal / Harsh)
+## Documentation
 
-This section is intentionally blunt. It’s meant to highlight what would block adoption in production environments and what would come up in a senior/principal review.
-
-### Grades
-
-- **Service / production-readiness grade: C**
-  - Main reasons:
-    - Security posture is currently weak (host key verification disabled; heavy string-concatenated shell execution).
-    - Correctness semantics are muddy (e.g., "changed" is reported for every successful task).
-
-- **Codebase / maintainability grade: B-**
-  - Main reasons:
-    - The DSL has good ergonomics and the file split is a meaningful improvement.
-    - The executor is still a large, stringly-typed action switch with duplicated logic and inconsistent behavior.
-
-### What’s strong
-
-- **DSL ergonomics**: `porter.Tasks( ... )` plus fluent modifiers is easy to use.
-- **Project structure**: Splitting the former monolithic DSL into domain-focused files makes the codebase navigable.
-- **CI + tests**: Basic Go build/test/vet/fmt checks are present and fast.
-- **Examples**: Realistic examples reduce time-to-first-success.
-
-### Top issues (must address)
-
-#### Security & safety (P0)
-
-- **Host key verification is disabled** (`ssh.InsecureIgnoreHostKey()` in `Connect`). This is not acceptable for production.
-- **Shell injection risk**: Most executor actions construct shell commands via string concatenation with unescaped user input (`Src`, `Dest`, `Body`). This is a broad attack surface.
-- **Sudo password handling**: `echo <password> | sudo -S ...` risks leaking secrets via process inspection and logs.
-
-#### Correctness & UX (P0)
-
-- **Changed vs OK semantics are incorrect**: successful tasks are currently counted as `Changed` even when nothing changed. This makes reporting untrustworthy.
-- **`Template(...)` semantics are unclear**: the public DSL suggests generic template/file writing, but execution behavior is coupled to systemd service file installation.
-- **Quoting/whitespace bugs**: paths containing spaces or special characters will break due to lack of proper quoting/escaping.
-
-#### Architecture & maintainability (P1)
-
-- **Stringly-typed action dispatcher**: `Task.Action` is effectively an unvalidated protocol. There are no compile-time guarantees and it’s easy to introduce inconsistencies.
-- **Executor responsibilities are too broad**: `executor.go` mixes orchestration, progress reporting, templating, systemd, docker, rsync, etc.
-- **Options encoded into `Body`** (`key:val;key:val`) is brittle and encourages parsing bugs.
-
-### Recommended roadmap
-
-#### P0 (security + correctness)
-
-- **Add strict host key verification**:
-  - Support `known_hosts` and/or allow passing a `HostKeyCallback`.
-- **Stop building shell commands via concatenation**:
-  - Use a safe command builder (at minimum, robust quoting/escaping).
-  - Prefer direct APIs when available (SFTP for file ops; structured `systemctl` calls).
-- **Fix status semantics**:
-  - Separate `OK` from `Changed` with real detection or explicit “changed” flags per action.
-- **Clarify/rename `Template` behavior**:
-  - Either make `Template` truly generic, or rename systemd-specific behavior to something explicit (e.g., `SystemdServiceTemplate`).
-
-#### P1 (structure)
-
-- **Refactor executor into domain handlers**:
-  - `executor_file.go`, `executor_systemd.go`, `executor_docker.go`, etc.
-  - Replace the big switch with a handler map or typed action interface.
-- **Introduce typed configs for complex actions** (instead of packing options into `Body`).
-
-#### P2 (polish + DX)
-
-- Add `golangci-lint` (or comparable) with a small, deliberate ruleset.
-- Add more executor-level tests (golden tests for generated commands, and integration tests behind a build tag).
-- Document the project’s compatibility guarantees (what is stable API vs internal).
+- [Architecture](docs/architecture.md) — how the library is put together, and how to add an action
+- [Roadmap](docs/ROADMAP.md) — what's done and what's planned
+- [journalctl examples](docs/journalctl-examples.md)
+- [MySQL auth / database notes](docs/mysql-auth.md)
+- [Security policy](SECURITY.md)
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, project layout, and how to add a new action. Please report
+security issues privately per [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT License - see [LICENSE](./LICENSE) for details.
+Porter is released under the [MIT License](LICENSE).

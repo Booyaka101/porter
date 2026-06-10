@@ -13,8 +13,8 @@ porter-*
 *.out
 
 # Node modules (will be installed in container)
-ui/node_modules
-ui/build
+web/ui/node_modules
+web/ui/build
 
 # IDE
 .idea/

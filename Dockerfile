@@ -1,14 +1,14 @@
 # Stage 1: Build UI
 FROM node:20-alpine AS ui-builder
 
-WORKDIR /app/ui
+WORKDIR /app/web/ui
 
 # Copy package files first for better caching
-COPY ui/package*.json ./
+COPY web/ui/package*.json ./
 RUN npm ci
 
 # Copy UI source and build
-COPY ui/ ./
+COPY web/ui/ ./
 RUN npm run build
 
 # Stage 2: Build Go binary
@@ -27,10 +27,10 @@ RUN go mod download
 COPY . .
 
 # Copy built UI from previous stage
-COPY --from=ui-builder /app/ui/build ./cmd/porter/build
+COPY --from=ui-builder /app/web/ui/build ./cmd/porter-ui/build
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o porter ./cmd/porter
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o porter-ui ./cmd/porter-ui
 
 # Stage 3: Final runtime image
 FROM alpine:3.19
@@ -48,7 +48,7 @@ RUN apk add --no-cache \
 RUN adduser -D -u 1000 porter
 
 # Copy binary from builder
-COPY --from=go-builder /app/porter /app/porter
+COPY --from=go-builder /app/porter-ui /app/porter-ui
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R porter:porter /app
@@ -68,5 +68,5 @@ ENV PORT=8069
 ENV USE_SQLITE=true
 
 # Run porter
-ENTRYPOINT ["/app/porter"]
+ENTRYPOINT ["/app/porter-ui"]
 CMD ["-open=false"]

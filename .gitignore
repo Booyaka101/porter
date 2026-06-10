@@ -4,8 +4,10 @@
 *.dll
 *.so
 *.dylib
-porter
-cmd/porter/porter
+/porter
+/porter-ui
+/porter-ui-*
+cmd/porter-ui/porter-ui
 
 # Test binary
 *.test
@@ -28,9 +30,9 @@ go.work
 Thumbs.db
 
 # Build artifacts
-cmd/porter/build/
-ui/build/
-ui/node_modules/
+cmd/porter-ui/build/
+web/ui/build/
+web/ui/node_modules/
 
 # Data files
 *.db
@@ -60,3 +62,14 @@ coverage.html
 
 # Logs
 *.log
+
+# Built UI assets (regenerate with `make ui`); keep the placeholder index.html
+web/build/assets/
+web/build/*.svg
+web/build/manifest.json
+porterw
+!cmd/porter-ui/build/index.html
+!web/build/index.html
+
+# Local AI-assistant config
+.claude/

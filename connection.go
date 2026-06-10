@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/melbahja/goph"
-	"golang.org/x/crypto/ssh"
 )
 
 // ConnectWithKey establishes an SSH connection using a private key file.
@@ -27,7 +26,7 @@ func ConnectWithKey(ip string, user string, keyPath string, timeout time.Duratio
 		Port:     22,
 		Auth:     auth,
 		Timeout:  timeout,
-		Callback: ssh.InsecureIgnoreHostKey(),
+		Callback: HostKeyCallback(),
 	})
 }
 
@@ -48,7 +47,7 @@ func ConnectWithKeyAndPassphrase(ip string, user string, keyPath string, passphr
 		Port:     22,
 		Auth:     auth,
 		Timeout:  timeout,
-		Callback: ssh.InsecureIgnoreHostKey(),
+		Callback: HostKeyCallback(),
 	})
 }
 
@@ -69,7 +68,7 @@ func ConnectWithAgent(ip string, user string, timeout time.Duration) (*goph.Clie
 		Port:     22,
 		Auth:     auth,
 		Timeout:  timeout,
-		Callback: ssh.InsecureIgnoreHostKey(),
+		Callback: HostKeyCallback(),
 	})
 }
 
@@ -109,7 +108,7 @@ func SSHPing(ip string, cfg Config) (time.Duration, error) {
 // It creates a tar archive locally, uploads it, and extracts on the remote.
 func UploadDir(client *goph.Client, localDir, remoteDir string) error {
 	// Create remote directory
-	_, err := client.Run(fmt.Sprintf("mkdir -p %s", remoteDir))
+	_, err := client.Run("mkdir -p " + shellEscape(remoteDir))
 	if err != nil {
 		return fmt.Errorf("failed to create remote directory: %w", err)
 	}
@@ -123,20 +122,20 @@ func UploadDir(client *goph.Client, localDir, remoteDir string) error {
 	tarFile.Close()
 	defer os.Remove(tarPath)
 
-	// Create tar archive using system tar command
-	cmd := fmt.Sprintf("tar -czf %s -C %s .", tarPath, localDir)
+	// Create tar archive using system tar command (paths shell-quoted)
+	cmd := "tar -czf " + shellEscape(tarPath) + " -C " + shellEscape(localDir) + " ."
 	if err := runLocalCommand(cmd); err != nil {
 		return fmt.Errorf("failed to create tar archive: %w", err)
 	}
 
-	// Upload tar file
-	remoteTar := fmt.Sprintf("/tmp/porter-upload-%d.tar.gz", time.Now().UnixNano())
+	// Upload tar file under an unpredictable name (no /tmp race/symlink attack)
+	remoteTar := "/tmp/porter-upload-" + randomID(8) + ".tar.gz"
 	if err := client.Upload(tarPath, remoteTar); err != nil {
 		return fmt.Errorf("failed to upload tar: %w", err)
 	}
 
 	// Extract on remote
-	_, err = client.Run(fmt.Sprintf("tar -xzf %s -C %s && rm -f %s", remoteTar, remoteDir, remoteTar))
+	_, err = client.Run("tar -xzf " + shellEscape(remoteTar) + " -C " + shellEscape(remoteDir) + " && rm -f " + shellEscape(remoteTar))
 	if err != nil {
 		return fmt.Errorf("failed to extract tar: %w", err)
 	}
@@ -151,9 +150,9 @@ func DownloadDir(client *goph.Client, remoteDir, localDir string) error {
 		return fmt.Errorf("failed to create local directory: %w", err)
 	}
 
-	// Create tar on remote
-	remoteTar := fmt.Sprintf("/tmp/porter-download-%d.tar.gz", time.Now().UnixNano())
-	_, err := client.Run(fmt.Sprintf("tar -czf %s -C %s .", remoteTar, remoteDir))
+	// Create tar on remote under an unpredictable name
+	remoteTar := "/tmp/porter-download-" + randomID(8) + ".tar.gz"
+	_, err := client.Run("tar -czf " + shellEscape(remoteTar) + " -C " + shellEscape(remoteDir) + " .")
 	if err != nil {
 		return fmt.Errorf("failed to create remote tar: %w", err)
 	}
@@ -169,15 +168,15 @@ func DownloadDir(client *goph.Client, remoteDir, localDir string) error {
 
 	if err := client.Download(remoteTar, tarPath); err != nil {
 		// Clean up remote tar
-		client.Run(fmt.Sprintf("rm -f %s", remoteTar))
+		client.Run("rm -f " + shellEscape(remoteTar))
 		return fmt.Errorf("failed to download tar: %w", err)
 	}
 
 	// Clean up remote tar
-	client.Run(fmt.Sprintf("rm -f %s", remoteTar))
+	client.Run("rm -f " + shellEscape(remoteTar))
 
-	// Extract locally
-	cmd := fmt.Sprintf("tar -xzf %s -C %s", tarPath, localDir)
+	// Extract locally (paths shell-quoted)
+	cmd := "tar -xzf " + shellEscape(tarPath) + " -C " + shellEscape(localDir)
 	if err := runLocalCommand(cmd); err != nil {
 		return fmt.Errorf("failed to extract tar: %w", err)
 	}

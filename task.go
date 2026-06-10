@@ -1,5 +1,7 @@
 package porter
 
+import "strings"
+
 import "time"
 
 // Task represents a single deployment action.
@@ -81,18 +83,15 @@ func (p TaskProgress) ProgressBar(width int) string {
 		width = 40
 	}
 	pct := float64(p.Index+1) / float64(p.Total)
-	filled := int(pct * float64(width))
-	if filled > width {
-		filled = width
-	}
-	bar := ""
+	filled := min(int(pct*float64(width)), width)
+	var bar strings.Builder
 	for i := 0; i < filled; i++ {
-		bar += "█"
+		bar.WriteString("█")
 	}
 	for i := filled; i < width; i++ {
-		bar += "░"
+		bar.WriteString("░")
 	}
-	return bar
+	return bar.String()
 }
 
 // String returns a formatted string representation of the progress
