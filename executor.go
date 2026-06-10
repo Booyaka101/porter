@@ -645,6 +645,18 @@ func (e *Executor) buildDockerRun(container, image, opts string) string {
 			}
 		case "network":
 			cmd.WriteString(" --network " + parts[1])
+		case "restart":
+			cmd.WriteString(" --restart " + parts[1])
+		case "init":
+			if parts[1] == "true" {
+				cmd.WriteString(" --init")
+			}
+		case "logrotate":
+			lr := strings.SplitN(parts[1], ",", 2)
+			cmd.WriteString(" --log-opt max-size=" + lr[0])
+			if len(lr) == 2 {
+				cmd.WriteString(" --log-opt max-file=" + lr[1])
+			}
 		}
 	}
 	return cmd.String() + " " + image

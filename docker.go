@@ -136,6 +136,23 @@ func (b TaskBuilder) Network(n string) TaskBuilder { return b.appendOpt("network
 // Detach runs the container in the background.
 func (b TaskBuilder) Detach() TaskBuilder { return b.appendOpt("detach", "true") }
 
+// Restart sets the container restart policy (e.g. "unless-stopped", "always",
+// "on-failure"). Recommended for long-lived services so they survive a daemon
+// or host restart. Off by default.
+func (b TaskBuilder) Restart(policy string) TaskBuilder { return b.appendOpt("restart", policy) }
+
+// Init runs the container with a tiny init process (--init) that reaps zombie
+// processes and forwards signals — recommended when the image's entrypoint is
+// not itself a proper init. Off by default.
+func (b TaskBuilder) Init() TaskBuilder { return b.appendOpt("init", "true") }
+
+// LogRotate caps the json-file log driver (--log-opt max-size / max-file) so a
+// container's logs can't fill the host disk. Example: LogRotate("10m", "3").
+// Off by default (Docker's default json-file driver has no rotation).
+func (b TaskBuilder) LogRotate(maxSize, maxFiles string) TaskBuilder {
+	return b.appendOpt("logrotate", maxSize+","+maxFiles)
+}
+
 // =============================================================================
 // DOCKER LIST/INFO OPERATIONS
 // =============================================================================

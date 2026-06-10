@@ -265,3 +265,30 @@ func TestReadOnlyActionsClassification(t *testing.T) {
 		}
 	}
 }
+
+func TestDockerRunServiceOptions(t *testing.T) {
+	e := &Executor{}
+	cmd := e.buildDockerRun("web", "nginx:1.27",
+		"ports:8080:80;restart:unless-stopped;init:true;logrotate:10m,3")
+	for _, want := range []string{
+		"docker run -d", "--name web",
+		"-p 8080:80",
+		"--restart unless-stopped",
+		"--init",
+		"--log-opt max-size=10m", "--log-opt max-file=3",
+		"nginx:1.27",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("docker run cmd missing %q:\n  %s", want, cmd)
+		}
+	}
+}
+
+func TestDockerRunOptionBuilders(t *testing.T) {
+	b := Docker("web").Run("nginx").Restart("always").Init().LogRotate("5m", "2").Build()
+	for _, want := range []string{"restart:always", "init:true", "logrotate:5m,2"} {
+		if !strings.Contains(b.Body, want) {
+			t.Errorf("Body missing %q: %s", want, b.Body)
+		}
+	}
+}
