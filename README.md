@@ -477,3 +477,21 @@ Or using the binary directly:
 ```
 
 This will migrate all users, machines, scheduled jobs, history, and settings from MySQL to SQLite.
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — how the library is put together, and how to add an action
+- [Roadmap](docs/ROADMAP.md) — what's done and what's planned
+- [journalctl examples](docs/journalctl-examples.md)
+- [MySQL auth / database notes](docs/mysql-auth.md)
+- [Security policy](SECURITY.md)
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, project layout, and how to add a new action. Please report
+security issues privately per [SECURITY.md](SECURITY.md).
+
+## License
+
+Porter is released under the [MIT License](LICENSE).

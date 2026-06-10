@@ -4,7 +4,7 @@ This package provides the backend API server for Porter's web-based server manag
 
 ## Overview
 
-The `porterui` package implements a REST API and WebSocket server that powers the Porter web UI. It provides comprehensive server management capabilities including:
+The `web` package implements a REST API and WebSocket server that powers the Porter web UI. It provides comprehensive server management capabilities including:
 
 - **Machine Management** - Add, edit, and organize remote servers
 - **Terminal Access** - Interactive SSH terminals via WebSocket
@@ -21,7 +21,7 @@ The `porterui` package implements a REST API and WebSocket server that powers th
 ## Architecture
 
 ```
-porterui/
+web/
 ├── router.go          # Route setup and middleware
 ├── auth.go            # Authentication and JWT handling
 ├── machines.go        # Machine CRUD and SSH connections
@@ -79,17 +79,17 @@ package main
 import (
     "net/http"
     "github.com/gorilla/mux"
-    "github.com/booyaka101/porter/porterui"
+    "github.com/booyaka101/porter/web"
 )
 
 func main() {
     r := mux.NewRouter()
     
     // Setup routes with authentication
-    porterui.SetupRoutesWithAuth(r)
+    web.SetupRoutesWithAuth(r)
     
     // Or without authentication
-    // porterui.SetupRoutes(r)
+    // web.SetupRoutes(r)
     
     http.ListenAndServe(":8080", r)
 }

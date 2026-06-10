@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Verified SSH host keys (TOFU/strict modes; `TrustHostCA` for an SSH host CA)
+- SSH-certificate auth (`ConnectWithCert`), bastion/ProxyJump (`ConnectViaJump`),
+  keepalives (`StartKeepalive`), and non-default ports (`Config.Port`)
+- Declarative state primitives (`EnsureFile`, `EnsureDir`, `EnsureSymlink`,
+  `EnsurePackage`, `EnsureLine`, `EnsureService*`, `EnsureCron`, `EnsureUser`,
+  `EnsureMode`, `EnsureOwner`, `EnsureAbsent`, `EnsureGitRepo`) with no-op when
+  converged, plus a real `SetDryRun(true)` preview
+- Goss-style health assertions (`AssertServiceActive`, `AssertHTTPStatus`, ...)
+- Atomic releases with health-gated cutover and rollback (`NewRelease`, `Rollback`)
+- Deploy-as-an-OpenTelemetry-trace (`NewTracer`) and structured logging (`SetLogger`)
+- Secrets via SOPS+age (`Secret`) and pluggable CLI backends (`SecretCommand`)
+- Supply-chain verification gate (`VerifyBlob`, `VerifyImage`) using cosign
+- Dashboard: optional agent-channel auth (`PORTER_AGENT_TOKEN`) and a deploy
+  trace waterfall viewer at `/traces`
+
+### Changed
+- The action dispatcher is now a registry of small handlers (`actions_*.go`)
+  instead of one monolithic switch
+- Repository restructured: the importable library is the front door; the
+  optional dashboard moved to `web/` (package `web`) and `cmd/porter-ui`
+- Dashboard authentication is **on by default** (`PORTER_AUTH=0` to disable);
+  the first-boot admin password is randomly generated (or `PORTER_ADMIN_PASSWORD`)
+- `Changed` accounting now reflects real mutations (read-only/converged tasks
+  report `ok`, not `changed`)
+
+### Security
+- AES credential storage fails closed on decryption errors
+- WebSocket and SSE endpoints are origin-checked
+- Sudo passwords are fed via stdin, never the process argv
+
+### Older entries
 - Initial public release
 - Declarative DSL for deployment tasks
 - SSH/SFTP file transfers and command execution
