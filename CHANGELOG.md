@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-10
+
+### Added
+- `TrustCAContent(pem).As(anchor)` — install an in-memory PEM CA into the OS
+  trust store in one step (writes it into `/usr/local/share/ca-certificates`
+  atomically at 0644 + runs `update-ca-certificates`), so callers holding a CA
+  root in memory no longer stage a file and run `update-ca-certificates` by hand.
+
 ## [0.10.0] - 2026-06-10
 
 ### Added
@@ -79,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Variable system (Vars)
 - Task executor with progress reporting
 
-[Unreleased]: https://github.com/booyaka101/porter/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/booyaka101/porter/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/booyaka101/porter/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/booyaka101/porter/compare/v0.1.0...v0.10.0
 [0.1.0]: https://github.com/booyaka101/porter/releases/tag/v0.1.0

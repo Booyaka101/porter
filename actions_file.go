@@ -14,6 +14,7 @@ func init() {
 	register("chown", actChown)
 	register("chmod", actChmod)
 	register("trust_ca", actTrustCA)
+	register("trust_ca_content", actTrustCAContent)
 	register("install", actInstall)
 }
 
@@ -82,6 +83,10 @@ func actChmod(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars
 
 func actTrustCA(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
 	return e.trustCA(dest, src)
+}
+
+func actTrustCAContent(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
+	return e.trustCAContent(src, body) // src = anchor (.As), body = PEM
 }
 
 func actInstall(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
