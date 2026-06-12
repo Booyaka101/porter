@@ -12,6 +12,7 @@ func init() {
 	register("assert_package", actAssertPackage)
 	register("assert_http_status", actAssertHTTPStatus)
 	register("assert_command", actAssertCommand)
+	register("assert_cert_valid", actAssertCertValid)
 }
 
 func actAssertServiceActive(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
@@ -74,6 +75,17 @@ func actAssertHTTPStatus(e *Executor, t Task, src, dest, body, perm, own string,
 func actAssertCommand(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
 	if _, err := e.runCapture(body); err != nil {
 		return fmt.Errorf("assertion failed: command did not succeed: %s", body)
+	}
+	return nil
+}
+
+func actAssertCertValid(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
+	// `openssl x509 -checkend N` exits 0 iff the cert will still be valid N
+	// seconds from now; non-zero if it expires within the window, is already
+	// expired, or cannot be read. body carries the window in whole seconds.
+	cmd := "openssl x509 -checkend " + shellEscape(body) + " -noout -in " + shellEscape(dest)
+	if _, err := e.runCaptureMaybeSudo(t.Sudo, cmd); err != nil {
+		return fmt.Errorf("assertion failed: certificate %s is missing, unreadable, or expires within %ss", dest, body)
 	}
 	return nil
 }

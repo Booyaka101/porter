@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnsureBuilders(t *testing.T) {
@@ -226,6 +227,7 @@ func TestAssertBuilders(t *testing.T) {
 		{AssertPackageInstalled("nginx"), "assert_package"},
 		{AssertHTTPStatus("http://localhost/health", "200"), "assert_http_status"},
 		{AssertCommandSucceeds("test -f /tmp/ok"), "assert_command"},
+		{AssertCertValid("/c/leaf.crt", 30*24*time.Hour), "assert_cert_valid"},
 	}
 	for _, c := range cases {
 		if got := c.b.Build().Action; got != c.action {
@@ -241,6 +243,9 @@ func TestAssertBuilders(t *testing.T) {
 	}
 	if b := AssertHTTPStatus("http://x/h", "204").Build(); b.Body != "204" {
 		t.Errorf("AssertHTTPStatus code in Body: %+v", b)
+	}
+	if b := AssertCertValid("/c/leaf.crt", 30*24*time.Hour).Build(); b.Dest != "/c/leaf.crt" || b.Body != "2592000" {
+		t.Errorf("AssertCertValid fields: %+v", b)
 	}
 }
 

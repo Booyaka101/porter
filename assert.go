@@ -1,5 +1,11 @@
 package porter
 
+import (
+	"fmt"
+	"strconv"
+	"time"
+)
+
 // =============================================================================
 // DECLARATIVE HEALTH ASSERTIONS (Goss-style)
 //
@@ -57,4 +63,23 @@ func AssertHTTPStatus(url, code string) TaskBuilder {
 // AssertCommandSucceeds fails unless the command exits zero on the remote.
 func AssertCommandSucceeds(cmd string) TaskBuilder {
 	return TaskBuilder{t: Task{Action: "assert_command", Body: cmd, Name: "assert command succeeds: " + cmd}}
+}
+
+// AssertCertValid fails unless the X.509 certificate at path stays valid for at
+// least `within` from now (its NotAfter is more than `within` in the future).
+// Use it as a pre-flight guard ("the leaf cert isn't about to expire, don't
+// deploy on top of a dying one") or a post-renewal smoke test. The check runs
+// on the remote host via `openssl x509 -checkend` (openssl must be installed
+// there); a missing, unreadable, or already-expired cert fails the assertion.
+// Use .Sudo() for a root-only cert path.
+//
+//	porter.AssertCertValid("/var/lib/idxgames/certs/leaf.crt", 30*24*time.Hour)
+func AssertCertValid(path string, within time.Duration) TaskBuilder {
+	secs := int64(within.Seconds())
+	return TaskBuilder{t: Task{
+		Action: "assert_cert_valid",
+		Dest:   path,
+		Body:   strconv.FormatInt(secs, 10),
+		Name:   fmt.Sprintf("assert cert valid for ≥%s: %s", within, path),
+	}}
 }

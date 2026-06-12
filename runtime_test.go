@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeRunner is a cmdRunner that records every command and answers from a
@@ -149,6 +150,20 @@ func TestExecAssertionsFailClosed(t *testing.T) {
 	changed, err := newTestExec(okrun).exec(AssertHTTPStatus("http://x/h", "200").Build(), NewVars())
 	if err != nil || changed {
 		t.Errorf("matching http assertion should pass read-only; changed=%v err=%v", changed, err)
+	}
+	// assert_cert_valid: openssl checkend non-zero (expiring/missing) -> error.
+	expiring := &fakeRunner{rules: []rule{{contains: "openssl x509 -checkend", err: errors.New("will expire")}}}
+	if _, err := newTestExec(expiring).exec(AssertCertValid("/c/leaf.crt", 30*24*time.Hour).Build(), NewVars()); err == nil {
+		t.Error("assert_cert_valid must fail when the cert is expiring or missing")
+	}
+	// assert_cert_valid: checkend zero -> ok, read-only (no change), window in seconds.
+	validCert := &fakeRunner{rules: []rule{{contains: "openssl x509 -checkend '2592000'", out: "Certificate will not expire"}}}
+	changed, err = newTestExec(validCert).exec(AssertCertValid("/c/leaf.crt", 30*24*time.Hour).Build(), NewVars())
+	if err != nil || changed {
+		t.Errorf("valid cert assertion should pass read-only; changed=%v err=%v", changed, err)
+	}
+	if !validCert.ran("openssl x509 -checkend '2592000' -noout -in '/c/leaf.crt'") {
+		t.Errorf("expected checkend with seconds window; calls=%v", validCert.calls)
 	}
 }
 
