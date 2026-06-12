@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-12
+
+### Added
+- `EnsureSystemdKey(path, section, key, value)` — idempotently ensure a
+  `key=value` directive under a systemd unit's `[section]` (Unit/Service/Timer/
+  Install). Inserts the line directly after the section header (where
+  `EnsureLine` would only append a stray line at EOF), no-ops when the key is
+  already present (operator edits win), preserves CRLF, and preserves the
+  unit's mode/owner on rewrite. `.Sudo()` for units under /etc/systemd/system.
+
 ## [0.13.0] - 2026-06-12
 
 ### Added
