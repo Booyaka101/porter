@@ -570,6 +570,7 @@ var readOnlyActions = map[string]bool{
 	"assert_process": true, "assert_port_listening": true,
 	"assert_file_exists": true, "assert_file_contains": true,
 	"assert_package": true, "assert_http_status": true, "assert_command": true,
+	"assert_cert_valid": true,
 }
 
 // exec runs the action and reports whether it changed remote state. A

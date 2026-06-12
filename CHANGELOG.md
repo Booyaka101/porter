@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-12
+
+### Added
+- `AssertCertValid(path, within)` — Goss-style read-only assertion that fails a
+  deploy unless the X.509 cert at `path` stays valid for at least `within` from
+  now. Runs on the remote via `openssl x509 -checkend` (no new Go deps); use as
+  a pre-flight guard or post-renewal smoke test, `.Sudo()` for a root-only path.
+
 ## [0.12.0] - 2026-06-10
 
 ### Added
