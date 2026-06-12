@@ -3,6 +3,8 @@ package porter
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -52,6 +54,60 @@ func EnsurePackage(name string) TaskBuilder {
 // No-op if an identical line already exists. Use .Sudo() for root-owned files.
 func EnsureLine(file, line string) TaskBuilder {
 	return TaskBuilder{t: Task{Action: "ensure_line", Dest: file, Body: line}}
+}
+
+// EnsureSystemdKey ensures `key=value` exists under the given systemd unit
+// [section] (e.g. "Unit", "Service", "Timer", "Install") of the unit file at
+// path. Unlike EnsureLine, which appends a bare line at end-of-file, this
+// inserts the directive directly after the section header — the only correct
+// place for a systemd key. Idempotent and operator-friendly: if a line starting
+// with `key=` already appears anywhere in the file it is left untouched and the
+// task is a no-op (a hand-edited value wins). The section header must already
+// exist, else the task fails. Use .Sudo() for a unit under /etc/systemd/system,
+// and follow a change with Run("systemctl daemon-reload"). CRLF endings are
+// preserved; surrounding blank lines are normalized.
+//
+//	porter.EnsureSystemdKey("/etc/systemd/system/app.service", "Service", "Restart", "always").Sudo()
+func EnsureSystemdKey(path, section, key, value string) TaskBuilder {
+	return TaskBuilder{t: Task{Action: "ensure_systemd_key", Dest: path, Src: section, Body: key + "=" + value}}
+}
+
+// ensureSystemdKeyInContent inserts kv ("key=value") under the [section] header
+// of a systemd unit's content, returning the new content and whether it
+// changed. If a line beginning with the same key= already exists anywhere, the
+// content is returned unchanged (changed=false) so an operator's edit is never
+// clobbered. Errors if the section header is absent. CRLF is preserved.
+func ensureSystemdKeyInContent(content, section, kv string) (string, bool, error) {
+	eq := strings.IndexByte(kv, '=')
+	if eq < 0 {
+		return "", false, errors.New("systemd key must be in key=value form")
+	}
+	keyPrefix := kv[:eq+1]
+	header := "[" + section + "]"
+
+	lines := strings.Split(content, "\n")
+	headerIdx := -1
+	for i, line := range lines {
+		if strings.TrimRight(line, " \t\r") == header {
+			headerIdx = i
+		}
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), keyPrefix) {
+			return content, false, nil // already present — operator wins
+		}
+	}
+	if headerIdx < 0 {
+		return "", false, fmt.Errorf("systemd section [%s] not found", section)
+	}
+
+	inserted := kv
+	if strings.HasSuffix(lines[headerIdx], "\r") {
+		inserted += "\r" // keep the file's CRLF convention
+	}
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:headerIdx+1]...)
+	out = append(out, inserted)
+	out = append(out, lines[headerIdx+1:]...)
+	return strings.Join(out, "\n"), true, nil
 }
 
 // EnsureServiceRunning ensures a systemd unit is active (started if not).

@@ -125,6 +125,35 @@ func TestExecEnsureCronIdempotent(t *testing.T) {
 	}
 }
 
+func TestExecEnsureSystemdKeyIdempotent(t *testing.T) {
+	// Key already present -> no-op, no rewrite.
+	present := &fakeRunner{rules: []rule{
+		{contains: "cat '/etc", out: "[Service]\nRestart=on-failure\nExecStart=/x\n"},
+	}}
+	e := newTestExec(present)
+	changed, err := e.exec(EnsureSystemdKey("/etc/systemd/system/app.service", "Service", "Restart", "always").Sudo().Build(), NewVars())
+	if err != nil || changed {
+		t.Fatalf("present key: changed=%v err=%v", changed, err)
+	}
+	if present.ran("cat >") {
+		t.Error("present key must not rewrite the unit")
+	}
+
+	// Key absent -> inserted, unit rewritten (changed).
+	absent := &fakeRunner{rules: []rule{
+		{contains: "cat '/etc", out: "[Service]\nExecStart=/x\n"},
+		{contains: "mktemp", out: "/tmp/p"},
+	}}
+	e2 := newTestExec(absent)
+	changed, err = e2.exec(EnsureSystemdKey("/etc/systemd/system/app.service", "Service", "Restart", "always").Sudo().Build(), NewVars())
+	if err != nil {
+		t.Fatalf("absent exec: %v", err)
+	}
+	if !changed || !absent.ran("cat >") {
+		t.Errorf("absent key should rewrite the unit; changed=%v calls=%v", changed, absent.calls)
+	}
+}
+
 func TestExecAssertionsFailClosed(t *testing.T) {
 	// assert_command: failure propagates.
 	failCmd := &fakeRunner{rules: []rule{{contains: "false", err: errors.New("exit 1")}}}

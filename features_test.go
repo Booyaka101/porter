@@ -20,6 +20,7 @@ func TestEnsureBuilders(t *testing.T) {
 		{EnsureSymlink("/opt/app/current", "/usr/bin/app"), "ensure_symlink", "/usr/bin/app"},
 		{EnsurePackage("nginx"), "ensure_package", "nginx"},
 		{EnsureLine("/etc/hosts", "10.0.0.1 db"), "ensure_line", "/etc/hosts"},
+		{EnsureSystemdKey("/etc/systemd/system/app.service", "Service", "Restart", "always"), "ensure_systemd_key", "/etc/systemd/system/app.service"},
 		{EnsureServiceRunning("nginx"), "ensure_service_running", "nginx"},
 		{EnsureServiceEnabled("nginx"), "ensure_service_enabled", "nginx"},
 	}
@@ -36,6 +37,40 @@ func TestEnsureBuilders(t *testing.T) {
 	f := EnsureFile("/etc/app.conf", "secret").Mode("0640").Owner("app:app").Build()
 	if f.Body != "secret" || f.Perm != "0640" || f.Own != "app:app" {
 		t.Errorf("EnsureFile compose: %+v", f)
+	}
+	// EnsureSystemdKey carries section in Src and key=value in Body.
+	sk := EnsureSystemdKey("/etc/systemd/system/app.service", "Service", "Restart", "always").Build()
+	if sk.Src != "Service" || sk.Body != "Restart=always" {
+		t.Errorf("EnsureSystemdKey compose: %+v", sk)
+	}
+}
+
+func TestEnsureSystemdKeyInContent(t *testing.T) {
+	const unit = "[Unit]\nDescription=app\n\n[Service]\nExecStart=/usr/bin/app\n"
+
+	// Insert under [Service]: lands directly after the header, not at EOF.
+	got, changed, err := ensureSystemdKeyInContent(unit, "Service", "Restart=always")
+	if err != nil || !changed {
+		t.Fatalf("insert: changed=%v err=%v", changed, err)
+	}
+	if want := "[Unit]\nDescription=app\n\n[Service]\nRestart=always\nExecStart=/usr/bin/app\n"; got != want {
+		t.Errorf("insert placement wrong:\n got %q\nwant %q", got, want)
+	}
+
+	// Already present anywhere -> no change (operator's value wins).
+	if _, changed, _ := ensureSystemdKeyInContent("[Service]\nRestart=on-failure\n", "Service", "Restart=always"); changed {
+		t.Error("existing key must not be clobbered")
+	}
+
+	// Missing section -> error.
+	if _, _, err := ensureSystemdKeyInContent("[Unit]\nDescription=x\n", "Service", "Restart=always"); err == nil {
+		t.Error("missing section must error")
+	}
+
+	// CRLF preserved on the inserted line.
+	got, _, _ = ensureSystemdKeyInContent("[Service]\r\nExecStart=/x\r\n", "Service", "Restart=always")
+	if !strings.Contains(got, "Restart=always\r\n") {
+		t.Errorf("CRLF not preserved: %q", got)
 	}
 }
 

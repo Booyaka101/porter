@@ -1,11 +1,14 @@
 package porter
 
+import "fmt"
+
 func init() {
 	register("ensure_file", actEnsureFile)
 	register("ensure_dir", actEnsureDir)
 	register("ensure_symlink", actEnsureSymlink)
 	register("ensure_package", actEnsurePackage)
 	register("ensure_line", actEnsureLine)
+	register("ensure_systemd_key", actEnsureSystemdKey)
 	register("ensure_service_running", actEnsureServiceRunning)
 	register("ensure_service_enabled", actEnsureServiceEnabled)
 	register("ensure_cron", actEnsureCron)
@@ -58,6 +61,25 @@ func actEnsureLine(e *Executor, t Task, src, dest, body, perm, own string, vars 
 		return e.runSudo("sh -c " + shellEscape(appendCmd))
 	}
 	return e.run(appendCmd)
+}
+
+func actEnsureSystemdKey(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
+	// src = section ("Service"/"Unit"/...), body = "key=value", dest = unit path.
+	content, err := e.runCaptureMaybeSudo(t.Sudo, "cat "+shellEscape(dest))
+	if err != nil {
+		return fmt.Errorf("ensure_systemd_key: read %s: %w", dest, err)
+	}
+	newContent, changed, err := ensureSystemdKeyInContent(content, src, body)
+	if err != nil {
+		return fmt.Errorf("ensure_systemd_key %s: %w", dest, err)
+	}
+	if !changed {
+		e.noOp = true
+		return nil
+	}
+	// Empty perm/owner: writeFile cp's over the existing unit, preserving its
+	// mode and ownership (typically 0644 root:root).
+	return e.writeFile(dest, newContent, t.Sudo, "", "")
 }
 
 func actEnsureServiceRunning(e *Executor, t Task, src, dest, body, perm, own string, vars *Vars) error {
