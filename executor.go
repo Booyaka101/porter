@@ -299,7 +299,13 @@ func (e *Executor) sudo(cmd string) string {
 	// never lands in the remote process table) and shell-quote it so embedded
 	// metacharacters can neither break the command nor inject shell. -p ''
 	// suppresses the prompt that would otherwise pollute stdout.
-	return "printf '%s\\n' " + shellEscape(e.password) + " | sudo -S -p '' " + cmd
+	//
+	// Wrap cmd in `sh -c` so a compound command (&&, ||, |, ;, redirects) runs
+	// in full as root. Appending it raw would leave the shell binding the
+	// operator at the top level — only the first simple command would run under
+	// sudo and the rest as the SSH user (e.g. `systemctl daemon-reload &&
+	// systemctl enable x` enabled nothing and exited 1).
+	return "printf '%s\\n' " + shellEscape(e.password) + " | sudo -S -p '' sh -c " + shellEscape(cmd)
 }
 
 func (e *Executor) run(cmd string) error {

@@ -24,8 +24,9 @@ type rule struct {
 
 func (f *fakeRunner) Run(cmd string) ([]byte, error) {
 	f.calls = append(f.calls, cmd)
+	logical := unwrapSudo(cmd)
 	for _, r := range f.rules {
-		if strings.Contains(cmd, r.contains) {
+		if strings.Contains(cmd, r.contains) || strings.Contains(logical, r.contains) {
 			return []byte(r.out), r.err
 		}
 	}
@@ -34,11 +35,27 @@ func (f *fakeRunner) Run(cmd string) ([]byte, error) {
 
 func (f *fakeRunner) ran(substr string) bool {
 	for _, c := range f.calls {
-		if strings.Contains(c, substr) {
+		if strings.Contains(c, substr) || strings.Contains(unwrapSudo(c), substr) {
 			return true
 		}
 	}
 	return false
+}
+
+// unwrapSudo returns the logical command inside porter's sudo wrapper
+// (printf ... | sudo -S -p ” sh -c '<shellEscaped cmd>'), reversing the
+// shell-escaping, so rules/assertions written against the logical command keep
+// matching after Executor.sudo wraps and escapes it.
+func unwrapSudo(cmd string) string {
+	const marker = "sudo -S -p '' sh -c "
+	i := strings.Index(cmd, marker)
+	if i < 0 {
+		return cmd
+	}
+	rest := strings.TrimSpace(cmd[i+len(marker):])
+	rest = strings.TrimPrefix(rest, "'")
+	rest = strings.TrimSuffix(rest, "'")
+	return strings.ReplaceAll(rest, `'\''`, "'")
 }
 
 func newTestExec(fr *fakeRunner) *Executor {
@@ -254,4 +271,27 @@ func (c *countingRunner) Run(cmd string) ([]byte, error) {
 		return nil, errors.New("transient failure")
 	}
 	return nil, nil
+}
+
+// TestExecSudoWrapsCompoundCommand is a regression guard: a .Sudo() Run with a
+// compound command (&&, |, ;, redirects) must run in full as root. The bug was
+// that the command was appended raw after `sudo -S -p ” `, so the shell bound
+// the operator at the top level and only the first simple command ran under
+// sudo — `systemctl daemon-reload && systemctl enable x` enabled nothing and
+// exited 1 (the device-enrollment "Enable renewal timer" failure on 10.0.1.197).
+func TestExecSudoWrapsCompoundCommand(t *testing.T) {
+	fr := &fakeRunner{}
+	e := &Executor{runner: fr, password: "pw", verbose: false}
+	if err := e.runSudo("systemctl daemon-reload && systemctl enable --now x.timer"); err != nil {
+		t.Fatalf("runSudo: %v", err)
+	}
+	got := fr.calls[len(fr.calls)-1]
+	// The whole compound command must be inside a single `sudo ... sh -c '...'`,
+	// so both halves run as root.
+	if !strings.Contains(got, "sudo -S -p '' sh -c ") {
+		t.Errorf("compound sudo command not wrapped in sh -c: %s", got)
+	}
+	if strings.Contains(got, "x.timer'\n") || !strings.Contains(unwrapSudo(got), "systemctl daemon-reload && systemctl enable --now x.timer") {
+		t.Errorf("the && chain is not contained within the sudo sh -c: %s", got)
+	}
 }
