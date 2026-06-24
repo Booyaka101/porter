@@ -56,14 +56,7 @@ func ConnectWithCert(ip, user, keyPath, certPath, passphrase string, port uint, 
 		return nil, fmt.Errorf("build certificate signer: %w", err)
 	}
 
-	return goph.NewConn(&goph.Config{
-		User:     user,
-		Addr:     ip,
-		Port:     sshPort(port),
-		Auth:     goph.Auth{ssh.PublicKeys(certSigner)},
-		Timeout:  timeout,
-		Callback: HostKeyCallback(),
-	})
+	return dialBounded(user, ip, port, goph.Auth{ssh.PublicKeys(certSigner)}, timeout)
 }
 
 // StartKeepalive sends OpenSSH keepalive requests over the connection every

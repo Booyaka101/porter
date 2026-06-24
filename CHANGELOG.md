@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-24
+
+### Fixed
+- **Bounded SSH handshake — no more indefinite hangs or leaked connections.**
+  `goph`/`crypto-ssh` honoured `Config.Timeout` only for the TCP dial; once the
+  socket connected, a server that stalled mid-handshake (sshd shedding load,
+  sitting at `MaxStartups`, or slow to answer the key exchange) made
+  `ssh.NewClientConn` block forever **and** never closed the socket, leaking an
+  unauthenticated connection that held a server slot until `LoginGraceTime`. A
+  caller wrapping the connect in its own deadline (e.g. a retry loop) abandoned
+  the goroutine but could not reclaim the socket, so repeated attempts piled up
+  against `MaxStartups` and turned a brief server hiccup into a self-sustaining
+  stall. `Connect`, `ConnectWithKey`, `ConnectWithKeyAndPassphrase`,
+  `ConnectWithAgent` and `ConnectWithCert` now route through a single dialer
+  (`dialBounded`) that bounds the **entire** handshake — TCP, KEX and auth — by
+  `Config.Timeout` and closes the socket on failure, then clears the deadline so
+  the live session is never interrupted.
+
+## [0.15.0] - 2026-06-15
+
+### Fixed
+- Compound `.Sudo()` commands now run fully as root. `Executor.sudo` appended
+  the command raw after `sudo -S -p ''`, so a shell operator (`&&`, `;`, `|`)
+  bound at the top level and only the first segment ran as root. The command is
+  now wrapped in `sh -c <shell-escaped>` so the whole compound runs under sudo.
+
 ## [0.14.0] - 2026-06-12
 
 ### Added

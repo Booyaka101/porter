@@ -20,14 +20,7 @@ func ConnectWithKey(ip string, user string, keyPath string, timeout time.Duratio
 		return nil, fmt.Errorf("failed to load key: %w", err)
 	}
 
-	return goph.NewConn(&goph.Config{
-		User:     user,
-		Addr:     ip,
-		Port:     22,
-		Auth:     auth,
-		Timeout:  timeout,
-		Callback: HostKeyCallback(),
-	})
+	return dialBounded(user, ip, 22, auth, timeout)
 }
 
 // ConnectWithKeyAndPassphrase establishes an SSH connection using a passphrase-protected key.
@@ -41,14 +34,7 @@ func ConnectWithKeyAndPassphrase(ip string, user string, keyPath string, passphr
 		return nil, fmt.Errorf("failed to load key: %w", err)
 	}
 
-	return goph.NewConn(&goph.Config{
-		User:     user,
-		Addr:     ip,
-		Port:     22,
-		Auth:     auth,
-		Timeout:  timeout,
-		Callback: HostKeyCallback(),
-	})
+	return dialBounded(user, ip, 22, auth, timeout)
 }
 
 // ConnectWithAgent establishes an SSH connection using the SSH agent.
@@ -62,14 +48,7 @@ func ConnectWithAgent(ip string, user string, timeout time.Duration) (*goph.Clie
 		return nil, fmt.Errorf("failed to use SSH agent: %w", err)
 	}
 
-	return goph.NewConn(&goph.Config{
-		User:     user,
-		Addr:     ip,
-		Port:     22,
-		Auth:     auth,
-		Timeout:  timeout,
-		Callback: HostKeyCallback(),
-	})
+	return dialBounded(user, ip, 22, auth, timeout)
 }
 
 // TestConnection tests if an SSH connection can be established.
